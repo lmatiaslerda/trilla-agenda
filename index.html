@@ -227,7 +227,7 @@ function ControlMails() {
     return () => unsub();
   }, [dbListo]);
 
-  // Estado efectivo de un mail — puede tener ambos o solo uno
+  // Estado efectivo de un mail - puede tener ambos o solo uno
   // Retorna array de estados activos: ['pendiente'] | ['reenviado'] | ['respondido'] | ['reenviado','respondido']
   const estadosActivos = (m) => {
     const estados = [];
@@ -248,7 +248,7 @@ function ControlMails() {
   };
 
   const sincronizar = async () => {
-    // Fuerza recarga desde Firebase — los datos reales los escribe Apps Script cada 5 minutos
+    // Fuerza recarga desde Firebase - los datos reales los escribe Apps Script cada 5 minutos
     setSincrState('loading');
     try {
       const { collection, getDocs } = window.__firebase;
@@ -931,7 +931,7 @@ function CotizadorApp() {
     const fecha=new Date().toLocaleDateString('es-AR',{day:'2-digit',month:'long',year:'numeric'});
     const ciudad=cotConfig.ciudad||'';
     pdoc.setFillColor(0,45,90);pdoc.rect(0,0,W,30,'F');
-    if(logoDataURL){try{const img=new Image();img.src=logoDataURL;const ratio=img.width/img.height;const lH=24,lW=lH*ratio;pdoc.addImage(logoDataURL,'PNG',mg,3,lW,lH);}catch(e){}}
+    if(logoDataURL){try{const lH=22,lW=Math.min(lH*1.5,60);pdoc.addImage(logoDataURL,'PNG',mg,4,lW,lH);}catch(e){}}
     pdoc.setFontSize(10);pdoc.setFont(undefined,'normal');pdoc.setTextColor(255,255,255);
     pdoc.text(ciudad?ciudad+', '+fecha:fecha,W-mg,16,{align:'right'});
     pdoc.setFillColor(0,102,180);pdoc.rect(mg,32,W-mg*2,8,'F');
@@ -964,6 +964,166 @@ function CotizadorApp() {
       [uCu.name,f.ha||'—',f.depto||'—',f.provincia||'—',cobStr,f.tasa||'—',f.franq||'—',f.resiembra?f.resiembra+'%':'—'].forEach((v,i)=>pdoc.text(pdoc.splitTextToSize(v,colW[i]-2),cols[i]+1.5,y+6));
       y+=rowH;
     });
+    pdoc.setDrawColor(180,190,205);pdoc.setLineWidth(0.5);pdoc.line(mg,y,W-mg,y);y+=8;
+
+    // ── Función para renderizar texto con formato **negrita**
+    const drawRichText=(text,x,sY,maxW,lH)=>{
+      const lineH=lH||5.8;
+      let curY=sY;
+      if(!text)return curY;
+      // Separar por marcadores de negrita **texto**
+      const partes=[];
+      let remaining=text;
+      while(remaining.length>0){
+        const startMark=remaining.indexOf('**');
+        if(startMark===-1){partes.push({t:remaining,b:false});break;}
+        if(startMark>0)partes.push({t:remaining.substring(0,startMark),b:false});
+        const endMark=remaining.indexOf('**',startMark+2);
+        if(endMark===-1){partes.push({t:remaining.substring(startMark),b:false});break;}
+        partes.push({t:remaining.substring(startMark+2,endMark),b:true});
+        remaining=remaining.substring(endMark+2);
+      }
+      // Renderizar cada parte
+      partes.forEach(parte=>{
+        pdoc.setFont(undefined,parte.b?'bold':'normal');
+        pdoc.setFontSize(9.5);
+        const lineas=parte.t.split(String.fromCharCode(10));
+        lineas.forEach((linea,li)=>{
+          if(li>0)curY+=lineH;
+          const palabras=linea.split(' ');
+          let curX=x;
+          palabras.forEach(w=>{
+            if(!w)return;
+            const wW=pdoc.getTextWidth(w+' ');
+            if(curX+wW>x+maxW&&curX!==x){curX=x;curY+=lineH;}
+            pdoc.text(w,curX,curY);
+            curX+=wW;
+          });
+        });
+      });
+      return curY+lineH;
+    };
+
+    const secTitle=(label)=>{
+      if(y>252){pdoc.addPage();y=20;}
+      pdoc.setFontSize(8.5);pdoc.setFont(undefined,'bold');pdoc.setTextColor(26,46,74);
+      pdoc.text(label,mg,y);
+      pdoc.setDrawColor(200,210,225);pdoc.setLineWidth(0.35);pdoc.line(mg,y+1.5,W-mg,y+1.5);
+      y+=7;
+    };
+
+    // ── Descripción del cultivo
+    if(uCu.desc){
+      secTitle('DESCRIPCIÓN DEL CULTIVO');
+      pdoc.setTextColor(55,68,85);
+      y=drawRichText(uCu.desc,mg,y,W-mg*2);
+      y+=4;
+    }
+
+    // ── Franquicias usadas
+    const franqsObj=[];
+    uFilas.forEach(f=>{if(f.franq&&!franqsObj.find(x=>x.name===f.franq))franqsObj.push(f.franq);});
+    if(franqsObj.length){
+      secTitle('FRANQUICIA / DEDUCIBLE');
+      franqsObj.forEach(fname=>{
+        const item=franqsGlobal.find(f=>f.name===fname);
+        if(!item)return;
+        if(y>252){pdoc.addPage();y=20;}
+        pdoc.setFontSize(9.5);pdoc.setFont(undefined,'bold');pdoc.setTextColor(26,46,74);
+        const nw=pdoc.getTextWidth(item.name+': ');
+        pdoc.text(item.name+': ',mg,y);
+        pdoc.setFont(undefined,'normal');pdoc.setTextColor(55,68,85);
+        const dl=pdoc.splitTextToSize(item.desc,W-mg*2-nw);
+        pdoc.text(dl,mg+nw,y);
+        y+=dl.length*5.8+4;
+      });
+    }
+
+    // ── Carencia
+    if(carencia){
+      secTitle('CARENCIA');
+      pdoc.setFontSize(9.5);
+      pdoc.setFont(undefined,'bold');pdoc.setTextColor(26,46,74);pdoc.text('Granizo: ',mg,y);
+      pdoc.setFont(undefined,'normal');pdoc.setTextColor(55,68,85);
+      const gl=pdoc.splitTextToSize((carencia.granizo||'')+' — '+(carencia.descGranizo||''),W-mg*2-20);
+      pdoc.text(gl,mg+20,y);y+=gl.length*5.5+3;
+      pdoc.setFont(undefined,'bold');pdoc.setTextColor(26,46,74);pdoc.text('Adicionales: ',mg,y);
+      pdoc.setFont(undefined,'normal');pdoc.setTextColor(55,68,85);
+      const al=pdoc.splitTextToSize((carencia.adicionales||'')+' — '+(carencia.descAdicionales||''),W-mg*2-24);
+      pdoc.text(al,mg+24,y);y+=al.length*5.5+6;
+    }
+
+    // ── Inicio de cobertura
+    if(uCu.inicioCobertura){
+      secTitle('INICIO DE COBERTURA PLENA');
+      pdoc.setFontSize(9.5);pdoc.setFont(undefined,'normal');pdoc.setTextColor(55,68,85);
+      const il=pdoc.splitTextToSize(uCu.inicioCobertura,W-mg*2);
+      pdoc.text(il,mg,y);y+=il.length*5.5+6;
+    }
+
+    // ── Adicionales seleccionados
+    if(adicItems.length){
+      secTitle('ADICIONALES');
+      adicItems.forEach(a=>{
+        if(y>252){pdoc.addPage();y=20;}
+        pdoc.setFontSize(10);pdoc.setFont(undefined,'bold');pdoc.setTextColor(26,46,74);
+        pdoc.text(a.name,mg,y);y+=6;
+        const parts2=[];
+        if(a.tipo)parts2.push(a.tipo);
+        if(a.deducible)parts2.push('Deducible: '+a.deducible);
+        if(a.carencia)parts2.push('Carencia: '+a.carencia);
+        if(a.inicioVig)parts2.push('Inicio: '+a.inicioVig);
+        if(a.finVig)parts2.push('Fin: '+a.finVig);
+        if(parts2.length){
+          pdoc.setFontSize(9);pdoc.setFont(undefined,'normal');pdoc.setTextColor(55,68,85);
+          const dl2=pdoc.splitTextToSize(parts2.join(' | '),W-mg*2);
+          pdoc.text(dl2,mg,y);y+=dl2.length*5.5+4;
+        }
+      });
+    }
+
+    // ── Tipo de contratación
+    if(uContratSel&&uContratSel.size){
+      secTitle('TIPO DE CONTRATACIÓN');
+      Array.from(uContratSel).forEach(k=>{
+        if(!ct[k])return;
+        if(y>252){pdoc.addPage();y=20;}
+        pdoc.setFontSize(9);pdoc.setFont(undefined,'bold');pdoc.setTextColor(26,46,74);
+        const lbl=k.charAt(0).toUpperCase()+k.slice(1)+': ';
+        const lw=pdoc.getTextWidth(lbl);
+        pdoc.text(lbl,mg,y);
+        pdoc.setFont(undefined,'normal');pdoc.setTextColor(55,68,85);
+        const vl=pdoc.splitTextToSize(ct[k],W-mg*2-lw);
+        pdoc.text(vl,mg+lw,y);y+=vl.length*5.5+4;
+      });
+    }
+
+    // ── Prórroga
+    if(uCo.prorroga){
+      secTitle('PRÓRROGA');
+      pdoc.setFontSize(9.5);pdoc.setFont(undefined,'normal');pdoc.setTextColor(55,68,85);
+      const pl=pdoc.splitTextToSize(uCo.prorroga,W-mg*2);
+      pdoc.text(pl,mg,y);y+=pl.length*5.8+4;
+    }
+
+    // ── Fin de vigencia
+    if(uCu.finVigencia){
+      secTitle('FIN DE VIGENCIA');
+      pdoc.setFontSize(9.5);pdoc.setFont(undefined,'normal');pdoc.setTextColor(55,68,85);
+      const fl=pdoc.splitTextToSize(uCu.finVigencia,W-mg*2);
+      pdoc.text(fl,mg,y);y+=fl.length*5.5+6;
+    }
+
+    // ── Pie de página
+    pdoc.setDrawColor(26,46,74);pdoc.setLineWidth(0.4);pdoc.line(mg,278,W-mg,278);
+    pdoc.setFontSize(8);pdoc.setTextColor(130,145,165);pdoc.setFont(undefined,'normal');
+    const fp=[];
+    if(cotConfig.tel)fp.push('Tel: '+cotConfig.tel);
+    if(cotConfig.email)fp.push(cotConfig.email);
+    if(cotConfig.pie)fp.push(cotConfig.pie);
+    if(fp.length)pdoc.text(fp.join('   |   '),W/2,283,{align:'center'});
+    pdoc.text('Documento generado el '+fecha,W/2,289,{align:'center'});
+
     pdoc.save('Cotizacion_'+uCu.name.replace(/\s+/g,'_')+'.pdf');
   };
 
@@ -1951,3 +2111,4 @@ root.render(<App />);
 </script>
 </body>
 </html>
+
