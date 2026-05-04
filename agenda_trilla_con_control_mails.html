@@ -1,0 +1,1953 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Trilla - Agenda Profesional</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%23003264'/%3E%3Ccircle cx='4' cy='4' r='2' fill='white'/%3E%3Cline x1='6' y1='4' x2='8' y2='4' stroke='white' stroke-width='1.5' stroke-linecap='round'/%3E%3Ccircle cx='10' cy='4' r='2' fill='white'/%3E%3Cline x1='12' y1='4' x2='14' y2='4' stroke='white' stroke-width='1.5' stroke-linecap='round'/%3E%3Ccircle cx='16' cy='4' r='2' fill='white'/%3E%3Cline x1='16' y1='6' x2='16' y2='8' stroke='white' stroke-width='1.5' stroke-linecap='round'/%3E%3Ccircle cx='16' cy='10' r='2' fill='white'/%3E%3Cline x1='14' y1='10' x2='12' y2='10' stroke='white' stroke-width='1.5' stroke-linecap='round'/%3E%3Ccircle cx='10' cy='10' r='2' fill='white'/%3E%3Cline x1='10' y1='12' x2='10' y2='14' stroke='white' stroke-width='1.5' stroke-linecap='round'/%3E%3Ccircle cx='10' cy='16' r='3' fill='white'/%3E%3C/svg%3E"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+  import { getFirestore, collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc, getDocs } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+  import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyCFRkrPuWclocpHJWRib-kNXVY4NfZn0YA",
+    authDomain: "agenda-93811.firebaseapp.com",
+    projectId: "agenda-93811",
+    storageBucket: "agenda-93811.firebasestorage.app",
+    messagingSenderId: "345365355689",
+    appId: "1:345365355689:web:fa23aefa8cc121354f9db8"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+  const auth = getAuth(app);
+
+  window.__db = db;
+  window.__auth = auth;
+  window.__firebase = { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc, getDocs, signInWithEmailAndPassword, signOut, onAuthStateChanged };
+  window.__firebaseReady = true;
+  window.dispatchEvent(new Event('firebaseReady'));
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:'Segoe UI',system-ui,sans-serif;}</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const URGENCIAS = [
+  { label: "Alta",  color: "#334155" },
+  { label: "Media", color: "#475569" },
+  { label: "Baja",  color: "#64748b" },
+];
+const DEFAULT_TAGS = [
+  { id: 1, label: "Trabajo",  color: "#1e40af" },
+  { id: 2, label: "Personal", color: "#0e7490" },
+  { id: 3, label: "Urgente",  color: "#b91c1c" },
+];
+const DEFAULT_USERS = [];
+const TAG_COLORS = ["#1e40af","#0e7490","#b91c1c","#065f46","#6b21a8","#92400e","#374151","#0f172a"];
+const RECURRENCIA_OPTS = ["No repetir","Diaria","Semanal","Mensual"];
+const AVATAR_COLORS = ["#1d4ed8","#0e7490","#065f46","#6b21a8","#92400e","#be123c","#374151"];
+const GEO = "'Bahnschrift Condensed', 'Arial Narrow', sans-serif";
+const USERS_DB = [{ usuario: "admin", password: "trilla2024" }];
+
+function todayStr() {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+}
+function nowStr() {
+  return new Date().toLocaleString("es-AR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+}
+function formatDate(str) {
+  if (!str) return "";
+  const p = str.split("-").map(Number);
+  return new Date(p[0],p[1]-1,p[2]).toLocaleDateString("es-AR",{day:"2-digit",month:"2-digit",year:"numeric"});
+}
+function formatCreatedDate(str) {
+  if (!str) return "";
+  if (str === todayStr()) return "Creada hoy";
+  const p = str.split("-").map(Number);
+  return "Creada el " + String(p[2]).padStart(2,"0") + "/" + String(p[1]).padStart(2,"0") + "/" + p[0];
+}
+function addDays(str, n) {
+  const p = str.split("-").map(Number);
+  const d = new Date(p[0],p[1]-1,p[2]);
+  d.setDate(d.getDate()+n);
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+}
+function addMonths(str, n) {
+  const p = str.split("-").map(Number);
+  const d = new Date(p[0],p[1]-1+n,p[2]);
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+}
+function nextRecurrence(fecha, tipo) {
+  if (tipo === "Diaria")  return addDays(fecha,1);
+  if (tipo === "Semanal") return addDays(fecha,7);
+  if (tipo === "Mensual") return addMonths(fecha,1);
+  return null;
+}
+function getDaysInMonth(y,m) { return new Date(y,m+1,0).getDate(); }
+function getFirstDayOfMonth(y,m) { return new Date(y,m,1).getDay(); }
+function nextWeekday(target) {
+  const d = new Date(); const c = d.getDay();
+  let diff = target - c; if (diff <= 0) diff += 7;
+  return addDays(todayStr(), diff);
+}
+function parseVoiceText(text) {
+  const lower = text.toLowerCase();
+  const result = { titulo: text, descripcion: "", urgencia: "Media", fecha: todayStr() };
+  const notaMatch = text.match(/\bnota[:\s]+(.+)/i);
+  if (notaMatch) { result.descripcion = notaMatch[1].trim(); text = text.replace(notaMatch[0],"").trim(); }
+  if (/urgent[ea]|alta|importante/i.test(lower)) result.urgencia = "Alta";
+  else if (/baja|sin\s+prisa|cuando\s+pueda/i.test(lower)) result.urgencia = "Baja";
+  result.titulo = text.replace(/urgente|urgenta|alta|baja|importante|sin prisa|cuando pueda/gi,"").replace(/\s+/g," ").trim();
+  if (/hoy/i.test(lower)) { result.fecha = todayStr(); result.titulo = result.titulo.replace(/hoy/gi,"").trim(); }
+  else if (/manana|mañana/i.test(lower)) { result.fecha = addDays(todayStr(),1); result.titulo = result.titulo.replace(/manana|mañana/gi,"").trim(); }
+  else if (/lunes/i.test(lower)) { result.fecha = nextWeekday(1); result.titulo = result.titulo.replace(/el\s+lunes|lunes/gi,"").trim(); }
+  else if (/martes/i.test(lower)) { result.fecha = nextWeekday(2); result.titulo = result.titulo.replace(/martes/gi,"").trim(); }
+  else if (/jueves/i.test(lower)) { result.fecha = nextWeekday(4); result.titulo = result.titulo.replace(/jueves/gi,"").trim(); }
+  else if (/viernes/i.test(lower)) { result.fecha = nextWeekday(5); result.titulo = result.titulo.replace(/viernes/gi,"").trim(); }
+  result.titulo = result.titulo.replace(/^(para|el|la|los|las|de|a)\s+/i,"").trim();
+  if (!result.titulo) result.titulo = text;
+  return result;
+}
+function speakMessage(msg) {
+  if (!window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  const doSpeak = () => {
+    const voices = window.speechSynthesis.getVoices();
+    const femVoice = voices.find(v => v.lang === "es-AR") || voices.find(v => v.lang.startsWith("es"));
+    const u = new SpeechSynthesisUtterance(msg);
+    u.lang = "es-AR"; u.rate = 0.92; u.pitch = 1.2;
+    if (femVoice) u.voice = femVoice;
+    window.speechSynthesis.speak(u);
+  };
+  const voices = window.speechSynthesis.getVoices();
+  if (voices.length > 0) doSpeak();
+  else window.speechSynthesis.addEventListener("voiceschanged", doSpeak, {once:true});
+}
+
+const TrillaLogo = ({size, color}) => {
+  const sz = size || 24; const cl = color || "white";
+  return (
+    <svg width={sz} height={sz} viewBox="0 0 24 24" fill="none">
+      <circle cx="4" cy="4" r="2.5" fill={cl}/>
+      <line x1="6.5" y1="4" x2="9.5" y2="4" stroke={cl} strokeWidth="1.8" strokeLinecap="round"/>
+      <circle cx="12" cy="4" r="2.5" fill={cl}/>
+      <line x1="14.5" y1="4" x2="17.5" y2="4" stroke={cl} strokeWidth="1.8" strokeLinecap="round"/>
+      <circle cx="20" cy="4" r="2.5" fill={cl}/>
+      <line x1="20" y1="6.5" x2="20" y2="9.5" stroke={cl} strokeWidth="1.8" strokeLinecap="round"/>
+      <circle cx="20" cy="12" r="2.5" fill={cl}/>
+      <line x1="17.5" y1="12" x2="14.5" y2="12" stroke={cl} strokeWidth="1.8" strokeLinecap="round"/>
+      <circle cx="12" cy="12" r="2.5" fill={cl}/>
+      <line x1="12" y1="14.5" x2="12" y2="17.5" stroke={cl} strokeWidth="1.8" strokeLinecap="round"/>
+      <circle cx="12" cy="20" r="4" fill={cl}/>
+      <circle cx="4" cy="12" r="1.8" fill={cl} opacity="0.15"/>
+      <circle cx="4" cy="20" r="1.8" fill={cl} opacity="0.15"/>
+      <circle cx="20" cy="20" r="1.8" fill={cl} opacity="0.15"/>
+    </svg>
+  );
+};
+
+const Badge = ({label, color}) => (
+  <span style={{fontSize:11,fontWeight:600,padding:"2px 8px",borderRadius:4,background:color+"18",color,border:"1px solid "+color+"44",letterSpacing:0.3,whiteSpace:"nowrap"}}>{label}</span>
+);
+const ActionBtn = ({onClick, title, children, active, activeColor, danger}) => {
+  const ac = activeColor || "#3b82f6";
+  return (
+    <button onClick={onClick} title={title} style={{background:danger?"#fef2f2":active?ac+"18":"#f8fafc",border:"1px solid "+(danger?"#fecaca":active?ac+"44":"#e2e8f0"),borderRadius:5,cursor:"pointer",padding:"5px 7px",color:danger?"#ef4444":active?ac:"#64748b",display:"flex",alignItems:"center",justifyContent:"center",transition:"all 0.15s"}}>
+      {children}
+    </button>
+  );
+};
+const Icon = ({d, size}) => {
+  const s = size || 15;
+  return (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d={d}/>
+    </svg>
+  );
+};
+const Avatar = ({nombre, size, initials, color}) => {
+  const s = size || 26;
+  const displayInitials = initials || (nombre ? nombre.slice(0,2).toUpperCase() : "?");
+  const colorIdx = nombre ? nombre.charCodeAt(0) % AVATAR_COLORS.length : 0;
+  const bgColor = color || AVATAR_COLORS[colorIdx];
+  return (
+    <div style={{width:s,height:s,borderRadius:"50%",background:bgColor,color:"white",display:"flex",alignItems:"center",justifyContent:"center",fontSize:s*0.38,fontWeight:700,flexShrink:0}}>
+      {displayInitials}
+    </div>
+  );
+};
+const StatusPill = ({label}) => (
+  <span style={{fontSize:10,fontWeight:700,background:"rgba(0,0,0,0.22)",color:"#fff",borderRadius:4,padding:"2px 7px",letterSpacing:0.4,whiteSpace:"nowrap"}}>{label}</span>
+);
+
+// ===================== CONTROL DE MAILS =====================
+function ControlMails() {
+  const TODAY = new Date(); TODAY.setHours(0,0,0,0);
+  function fmtDate(d){
+    if(!d) return '';
+    const dt = d.toDate ? d.toDate() : new Date(d);
+    return dt.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'2-digit'})+' '+dt.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+  }
+
+  const [mails, setMails] = useState([]);
+  const [periodo, setPeriodo] = useState('hoy');
+  const [filRemitente, setFilRemitente] = useState('');
+  const [filEstado, setFilEstado] = useState('');
+  const [busquedaRemitente, setBusquedaRemitente] = useState('');
+  const [sincrState, setSincrState] = useState('idle');
+  const [dbListo, setDbListo] = useState(false);
+
+  useEffect(() => {
+    if (!window.__firebaseReady) {
+      window.addEventListener('firebaseReady', () => setDbListo(true), {once:true});
+    } else {
+      setDbListo(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!dbListo) return;
+    const { collection, onSnapshot } = window.__firebase;
+    const db = window.__db;
+    const unsub = onSnapshot(collection(db, 'mails_control'), (snap) => {
+      const data = snap.docs.map(d => ({...d.data(), firebaseId: d.id}));
+      data.sort((a,b) => (b.fechaMs||0) - (a.fechaMs||0));
+      setMails(data);
+    });
+    return () => unsub();
+  }, [dbListo]);
+
+  // Estado efectivo de un mail — puede tener ambos o solo uno
+  // Retorna array de estados activos: ['pendiente'] | ['reenviado'] | ['respondido'] | ['reenviado','respondido']
+  const estadosActivos = (m) => {
+    const estados = [];
+    if (m.reenviado)  estados.push('reenviado');
+    if (m.respondido) estados.push('respondido');
+    if (estados.length === 0) estados.push('pendiente');
+    return estados;
+  };
+
+  // Para filtros: un mail coincide si alguno de sus estados activos coincide con el filtro
+  const coincideEstado = (m, filtro) => {
+    if (!filtro) return true;
+    if (filtro === 'pendiente')  return !m.reenviado && !m.respondido;
+    if (filtro === 'reenviado')  return !!m.reenviado;
+    if (filtro === 'respondido') return !!m.respondido;
+    if (filtro === 'ambos')      return !!m.reenviado && !!m.respondido;
+    return true;
+  };
+
+  const sincronizar = async () => {
+    // Fuerza recarga desde Firebase — los datos reales los escribe Apps Script cada 5 minutos
+    setSincrState('loading');
+    try {
+      const { collection, getDocs } = window.__firebase;
+      const db = window.__db;
+      const snap = await getDocs(collection(db, 'mails_control'));
+      const data = snap.docs.map(d => ({...d.data(), firebaseId: d.id}));
+      data.sort((a,b) => (b.fechaMs||0) - (a.fechaMs||0));
+      setMails(data);
+      setSincrState('ok');
+      setTimeout(() => setSincrState('idle'), 3000);
+    } catch(e) {
+      console.error(e);
+      setSincrState('error');
+      setTimeout(() => setSincrState('idle'), 3000);
+    }
+  };
+
+  function daysAgo(n){ const d=new Date(TODAY); d.setDate(d.getDate()-n); return d; }
+  const cutoffMs   = periodo==='hoy'?TODAY.getTime():periodo==='7d'?daysAgo(7).getTime():periodo==='30d'?daysAgo(30).getTime():0;
+
+  const filtered = mails.filter(m => {
+    if((m.fechaMs||0) < cutoffMs) return false;
+    if(filRemitente && m.remitente !== filRemitente) return false;
+    if(!coincideEstado(m, filEstado)) return false;
+    return true;
+  });
+
+  const total      = filtered.length;
+  const pendientes = filtered.filter(m => !m.reenviado && !m.respondido).length;
+  const respondidos= filtered.filter(m => m.respondido).length;
+  const reenviados = filtered.filter(m => m.reenviado).length;
+  const ambos      = filtered.filter(m => m.reenviado && m.respondido).length;
+
+  const nombreCorto = (email) => email ? email.split('@')[0].replace('.',' ').replace(/\b\w/g,l=>l.toUpperCase()) : '—';
+
+  // Remitentes filtrados por búsqueda
+  const remitentes = [...new Set(mails.map(m=>m.remitente))].filter(Boolean).sort();
+  const remitentesFiltrados = busquedaRemitente.trim()
+    ? remitentes.filter(r => r.toLowerCase().includes(busquedaRemitente.toLowerCase()) || nombreCorto(r).toLowerCase().includes(busquedaRemitente.toLowerCase()))
+    : remitentes;
+
+  // Limpiar datos demo de Firebase (emails que no son reales)
+  const limpiarDemoDB = async () => {
+    const { collection, getDocs, deleteDoc, doc } = window.__firebase;
+    const db = window.__db;
+    const snap = await getDocs(collection(db, 'mails_control'));
+    const demoIds = snap.docs
+      .filter(d => {
+        const data = d.data();
+        const rem = data.remitente || '';
+        // Identificar datos demo por remitentes conocidos de ejemplo
+        return rem.includes('juan.garcia@agro') || rem.includes('maria.lopez@campo') ||
+               rem.includes('pedro.romero@broker') || rem.includes('laura.diaz@agro') ||
+               rem.includes('carlos.mendez@gmail') || rem.includes('ana.fernandez@campo') ||
+               rem.includes('roberto.silva@agro') || rem.includes('google.com') ||
+               rem.includes('firebase') || rem.includes('noreply') ||
+               (data.gmailId && data.gmailId.startsWith('d'));
+      })
+      .map(d => d.id);
+    for (const id of demoIds) {
+      await deleteDoc(doc(db, 'mails_control', id));
+    }
+    Logger && Logger.log && Logger.log('Demo eliminados: ' + demoIds.length);
+  };
+
+  const selStyle = {fontFamily:GEO,fontSize:12,padding:"5px 10px",height:30,borderRadius:6,border:"1px solid #e2e8f0",background:"#f8fafc",color:"#1e293b",cursor:"pointer",letterSpacing:"0.03em"};
+  const periodBtnStyle = (p) => ({fontFamily:GEO,fontSize:12,letterSpacing:"0.06em",textTransform:"uppercase",padding:"4px 12px",borderRadius:6,border:periodo===p?"1px solid #003264":"1px solid #e2e8f0",background:periodo===p?"#003264":"transparent",color:periodo===p?"#fff":"#64748b",cursor:"pointer"});
+  const metricStyle = {background:"#f8fafc",borderRadius:10,padding:"12px 14px",border:"1px solid #e2e8f0",flex:1,minWidth:0};
+  const thStyle = {background:"#f1f5f9",fontSize:11,letterSpacing:"0.08em",textTransform:"uppercase",color:"#64748b",padding:"9px 12px",textAlign:"left",fontWeight:600,fontFamily:GEO,borderBottom:"1px solid #e2e8f0",whiteSpace:"nowrap"};
+  const tdStyle = {padding:"9px 12px",color:"#1a2e4a",verticalAlign:"middle",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:13,fontFamily:GEO};
+  const rowBg   = (i) => i%2===0 ? "#ffffff" : "#f8fafc";
+
+  // Badges individuales por tipo de estado
+  const BadgeReenviado  = () => <span style={{display:"inline-block",fontSize:10,letterSpacing:"0.06em",textTransform:"uppercase",fontFamily:GEO,padding:"2px 8px",borderRadius:99,background:"rgba(26,75,140,0.12)",color:"#1a4b8c",border:"1px solid rgba(26,75,140,0.25)",marginRight:3}}>Reenviado</span>;
+  const BadgeRespondido = () => <span style={{display:"inline-block",fontSize:10,letterSpacing:"0.06em",textTransform:"uppercase",fontFamily:GEO,padding:"2px 8px",borderRadius:99,background:"rgba(39,174,96,0.15)",color:"#1a6b3a",border:"1px solid rgba(39,174,96,0.3)",marginRight:3}}>Respondido</span>;
+  const BadgePendiente  = () => <span style={{display:"inline-block",fontSize:10,letterSpacing:"0.06em",textTransform:"uppercase",fontFamily:GEO,padding:"2px 8px",borderRadius:99,background:"rgba(255,107,107,0.18)",color:"#c0392b",border:"1px solid rgba(255,107,107,0.3)"}}>Pendiente</span>;
+
+  const EstadoBadges = ({m}) => {
+    if (!m.reenviado && !m.respondido) return <BadgePendiente/>;
+    return (
+      <div style={{display:"flex",flexWrap:"wrap",gap:2}}>
+        {m.reenviado  && <BadgeReenviado/>}
+        {m.respondido && <BadgeRespondido/>}
+      </div>
+    );
+  };
+
+  return (
+    <div style={{background:"white",borderRadius:10,padding:20,fontFamily:GEO,color:"#1e293b",border:"1px solid #e2e8f0",minHeight:500}}>
+
+      {/* Header */}
+      <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:20,borderBottom:"1px solid #e2e8f0",paddingBottom:16}}>
+        <div style={{width:38,height:38,background:"#003264",borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+            <circle cx="4"  cy="5"  r="2.5" fill="white"/>
+            <circle cx="11" cy="5"  r="2.5" fill="white"/>
+            <circle cx="18" cy="5"  r="2.5" fill="white"/>
+            <circle cx="18" cy="12" r="2.5" fill="white"/>
+            <circle cx="11" cy="12" r="2.5" fill="white"/>
+            <circle cx="11" cy="19" r="3.5" fill="white"/>
+            <circle cx="4"  cy="12" r="2"   fill="rgba(0,50,100,0.25)"/>
+            <circle cx="4"  cy="19" r="2"   fill="rgba(0,50,100,0.25)"/>
+            <circle cx="18" cy="19" r="2"   fill="rgba(0,50,100,0.25)"/>
+            <line x1="4"  y1="5"  x2="18" y2="5"  stroke="white" strokeWidth="1.5"/>
+            <line x1="18" y1="5"  x2="18" y2="12" stroke="white" strokeWidth="1.5"/>
+            <line x1="11" y1="12" x2="18" y2="12" stroke="white" strokeWidth="1.5"/>
+            <line x1="11" y1="12" x2="11" y2="19" stroke="white" strokeWidth="1.5"/>
+          </svg>
+        </div>
+        <div style={{flex:1}}>
+          <div style={{fontSize:22,fontWeight:400,letterSpacing:"0.18em",textTransform:"uppercase",color:"#003264",fontFamily:GEO}}>TRILLA</div>
+          <div style={{fontSize:12,color:"#64748b",letterSpacing:"0.06em",textTransform:"uppercase",fontFamily:GEO}}>Control de Mails</div>
+        </div>
+        <button onClick={sincronizar} disabled={sincrState==='loading'} style={{fontFamily:GEO,fontSize:12,letterSpacing:"0.08em",textTransform:"uppercase",padding:"7px 16px",borderRadius:7,border:"1px solid #e2e8f0",background:sincrState==='ok'?"#dcfce7":sincrState==='error'?"#fee2e2":"#003264",color:sincrState==='ok'?"#166534":sincrState==='error'?"#991b1b":"#fff",cursor:sincrState==='loading'?"not-allowed":"pointer",flexShrink:0}}>
+          {sincrState==='loading'?'Sincronizando...':sincrState==='ok'?'✓ Sincronizado':sincrState==='error'?'Error':'Sincronizar'}
+        </button>
+      </div>
+
+      {/* Métricas — ahora incluye "Ambos" */}
+      <div style={{display:"flex",gap:10,marginBottom:18,flexWrap:"wrap"}}>
+        <div style={metricStyle}>
+          <div style={{fontSize:11,letterSpacing:"0.08em",textTransform:"uppercase",color:"#94a3b8",marginBottom:4}}>Recibidos</div>
+          <div style={{fontSize:26,fontWeight:400,color:"#0f172a"}}>{total}</div>
+        </div>
+        <div style={metricStyle}>
+          <div style={{fontSize:11,letterSpacing:"0.08em",textTransform:"uppercase",color:"#94a3b8",marginBottom:4}}>Pendientes</div>
+          <div style={{fontSize:26,fontWeight:400,color:pendientes>0?"#FF6B6B":"#fff"}}>{pendientes}</div>
+        </div>
+        <div style={metricStyle}>
+          <div style={{fontSize:11,letterSpacing:"0.08em",textTransform:"uppercase",color:"#94a3b8",marginBottom:4}}>Reenviados</div>
+          <div style={{fontSize:26,fontWeight:400,color:"#7EB8F7"}}>{reenviados}</div>
+        </div>
+        <div style={metricStyle}>
+          <div style={{fontSize:11,letterSpacing:"0.08em",textTransform:"uppercase",color:"#94a3b8",marginBottom:4}}>Respondidos</div>
+          <div style={{fontSize:26,fontWeight:400,color:"#4ECFA8"}}>{respondidos}</div>
+        </div>
+        <div style={metricStyle}>
+          <div style={{fontSize:11,letterSpacing:"0.08em",textTransform:"uppercase",color:"#94a3b8",marginBottom:4}}>Ambos</div>
+          <div style={{fontSize:26,fontWeight:400,color:"#FFD060"}}>{ambos}</div>
+        </div>
+      </div>
+
+      {/* Filtros */}
+      <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:14,alignItems:"flex-end"}}>
+        <div>
+          <div style={{fontSize:10,letterSpacing:"0.08em",textTransform:"uppercase",color:"#94a3b8",marginBottom:5}}>Período</div>
+          <div style={{display:"flex",gap:4}}>
+            {['hoy','7d','30d','todo'].map(p=>(
+              <button key={p} style={periodBtnStyle(p)} onClick={()=>setPeriodo(p)}>
+                {p==='hoy'?'Hoy':p==='7d'?'7 días':p==='30d'?'30 días':'Todo'}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <div style={{fontSize:10,letterSpacing:"0.08em",textTransform:"uppercase",color:"#94a3b8",marginBottom:5}}>Remitente</div>
+          <div style={{position:"relative"}}>
+            <input
+              list="lista-remitentes"
+              value={busquedaRemitente}
+              onChange={e=>{
+                setBusquedaRemitente(e.target.value);
+                const match = remitentes.find(r=>r===e.target.value||nombreCorto(r)===e.target.value);
+                setFilRemitente(match||'');
+              }}
+              placeholder="Buscar o elegir remitente..."
+              style={{...selStyle,width:200,height:30}}
+            />
+            {busquedaRemitente && (
+              <button onClick={()=>{setBusquedaRemitente(''); setFilRemitente('');}} style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"#94a3b8",fontSize:14,lineHeight:1}}>×</button>
+            )}
+            <datalist id="lista-remitentes">
+              {remitentes.map(r=>(
+                <option key={r} value={r}>{nombreCorto(r)}</option>
+              ))}
+            </datalist>
+          </div>
+        </div>
+        <div>
+          <div style={{fontSize:10,letterSpacing:"0.08em",textTransform:"uppercase",color:"#94a3b8",marginBottom:5}}>Estado</div>
+          <select value={filEstado} onChange={e=>setFilEstado(e.target.value)} style={selStyle}>
+            <option value="">Todos</option>
+            <option value="pendiente">Pendiente</option>
+            <option value="reenviado">Reenviado</option>
+            <option value="respondido">Respondido</option>
+            <option value="ambos">Reenviado + Respondido</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Tabla */}
+      <div style={{borderRadius:8,border:"1px solid #e2e8f0",overflow:"hidden"}}>
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",minWidth:750}}>
+            <thead>
+              <tr>
+                <th style={{...thStyle,width:100}}>Fecha</th>
+                <th style={{...thStyle,width:140}}>Remitente</th>
+                <th style={{...thStyle}}>Asunto</th>
+                <th style={{...thStyle,width:160}}>Estado</th>
+                <th style={{...thStyle,width:150}}>Reenviado a</th>
+                <th style={{...thStyle,width:195}}>Gestión</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length===0 && (
+                <tr><td colSpan="6" style={{...tdStyle,textAlign:"center",padding:"2.5rem",color:"#94a3b8",letterSpacing:"0.05em",background:"#f8fafc"}}>
+                  {mails.length===0 ? "Presioná Sincronizar para cargar los mails." : "Sin mails para los filtros seleccionados."}
+                </td></tr>
+              )}
+              {filtered.map((m,i)=>(
+                <tr key={m.firebaseId||i} style={{borderBottom:"1px solid #e2e8f0",background:rowBg(i)}}>
+                  <td style={{...tdStyle,color:"#2c4a6e",fontSize:11}}>{fmtDate(m.fechaMs)}</td>
+                  <td style={{...tdStyle,color:"#1a2e4a",fontWeight:500}} title={m.remitente}>{nombreCorto(m.remitente)}</td>
+                  <td style={{...tdStyle,color:"#243d5c"}} title={m.asunto}>{m.asunto}</td>
+                  <td style={{...tdStyle,padding:"6px 12px"}}>
+                    <EstadoBadges m={m}/>
+                  </td>
+                  <td style={tdStyle}>
+                    {m.destinoReenvio
+                      ? <span style={{display:"inline-block",fontSize:11,fontFamily:GEO,padding:"2px 8px",borderRadius:99,maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",verticalAlign:"middle",background:"rgba(26,75,140,0.1)",color:"#1a4b8c",border:"1px solid rgba(26,75,140,0.2)"}} title={m.destinoReenvio}>{m.destinoReenvio}</span>
+                      : <span style={{color:"#8aaacc",fontSize:12}}>—</span>
+                    }
+                  </td>
+                  {/* Columna Gestión: muestra quién reenvió y quién respondió */}
+                  <td style={{...tdStyle,padding:"5px 12px"}}>
+                    <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                      {m.gestorReenvio && (
+                        <div style={{fontSize:11,color:"#1a4b8c",fontFamily:GEO,lineHeight:1.5}}>
+                          <span style={{color:"#8aaacc",fontSize:10,marginRight:4}}>Reenvió:</span>
+                          <strong>{m.gestorReenvio}</strong>
+                          {(m.fechaReenvio||m.horaReenvio) && (
+                            <span style={{color:"#8aaacc",marginLeft:4,fontSize:10,display:"block",paddingLeft:48}}>
+                              {m.fechaReenvio||m.horaReenvio}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {m.gestorRespuesta && (
+                        <div style={{fontSize:11,color:"#1a6b3a",fontFamily:GEO,lineHeight:1.5}}>
+                          <span style={{color:"#8aaacc",fontSize:10,marginRight:4}}>Respondió:</span>
+                          <strong>{m.gestorRespuesta}</strong>
+                          {(m.fechaRespuesta||m.horaRespuesta) && (
+                            <span style={{color:"#8aaacc",marginLeft:4,fontSize:10,display:"block",paddingLeft:60}}>
+                              {m.fechaRespuesta||m.horaRespuesta}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {!m.gestorReenvio && !m.gestorRespuesta && (
+                        <span style={{color:"#8aaacc",fontSize:12}}>—</span>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10}}>
+        <span style={{fontSize:12,color:"#94a3b8",letterSpacing:"0.04em"}}>
+          {filtered.length > 0 ? `${filtered.length} mail${filtered.length!==1?'s':''} encontrados` : ''}
+        </span>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <span style={{fontSize:11,color:"#cbd5e1",letterSpacing:"0.03em"}}>
+            agro@allariabroker.com.ar · Apps Script sync
+          </span>
+
+        </div>
+      </div>
+
+    </div>
+  );
+}
+// ===================== FIN CONTROL DE MAILS =====================
+
+
+
+function LoginScreen({onLogin}) {
+  const [usuario, setUsuario] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [showPass, setShowPass] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const handleLogin = async () => {
+    if (!usuario.trim() || !password.trim()) { setError("Completá usuario y contraseña."); return; }
+    setLoading(true); setError("");
+    const { signInWithEmailAndPassword } = window.__firebase;
+    const auth = window.__auth;
+    try {
+      await signInWithEmailAndPassword(auth, usuario.trim(), password);
+      localStorage.setItem("trilla_session", usuario.trim());
+      onLogin(usuario.trim());
+    } catch(e) {
+      setError("Usuario o contraseña incorrectos.");
+    }
+    setLoading(false);
+  };
+  return (
+    <div style={{minHeight:"100vh",background:"#003264",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Segoe UI',sans-serif",padding:20}}>
+      <div style={{background:"white",borderRadius:16,padding:"40px 36px",width:"100%",maxWidth:380,boxShadow:"0 20px 60px rgba(0,0,0,0.3)"}}>
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",marginBottom:32}}>
+          <div style={{width:56,height:56,borderRadius:14,background:"#003264",display:"flex",alignItems:"center",justifyContent:"center",marginBottom:14}}>
+            <TrillaLogo size={36} color="white"/>
+          </div>
+          <div style={{fontSize:26,fontWeight:700,color:"#003264",letterSpacing:4,fontFamily:GEO}}>TRILLA</div>
+          <div style={{fontSize:12,color:"#94a3b8",letterSpacing:2,marginTop:2,fontFamily:GEO}}>AGENDA PROFESIONAL</div>
+        </div>
+        <div style={{marginBottom:14}}>
+          <label style={{fontSize:11,color:"#64748b",display:"block",marginBottom:4,fontWeight:600,textTransform:"uppercase",letterSpacing:0.5}}>Usuario</label>
+          <input value={usuario} onChange={e=>{setUsuario(e.target.value);setError("");}} onKeyDown={e=>e.key==="Enter"&&handleLogin()} placeholder="Ingresa tu usuario" style={{width:"100%",padding:"10px 12px",borderRadius:8,border:"1px solid #e2e8f0",fontSize:14,color:"#1e293b",boxSizing:"border-box",outline:"none"}}/>
+        </div>
+        <div style={{marginBottom:20}}>
+          <label style={{fontSize:11,color:"#64748b",display:"block",marginBottom:4,fontWeight:600,textTransform:"uppercase",letterSpacing:0.5}}>Contrasena</label>
+          <div style={{position:"relative"}}>
+            <input type={showPass?"text":"password"} value={password} onChange={e=>{setPassword(e.target.value);setError("");}} onKeyDown={e=>e.key==="Enter"&&handleLogin()} placeholder="Ingresa tu contrasena" style={{width:"100%",padding:"10px 40px 10px 12px",borderRadius:8,border:"1px solid #e2e8f0",fontSize:14,color:"#1e293b",boxSizing:"border-box",outline:"none"}}/>
+            <button onClick={()=>setShowPass(!showPass)} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"#94a3b8",fontSize:12}}>{showPass?"Ocultar":"Ver"}</button>
+          </div>
+        </div>
+        {error && <div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#dc2626",marginBottom:14,textAlign:"center"}}>{error}</div>}
+        <button onClick={handleLogin} disabled={loading} style={{width:"100%",padding:"11px",borderRadius:8,border:"none",background:loading?"#94a3b8":"#003264",color:"white",fontSize:15,fontWeight:700,cursor:loading?"not-allowed":"pointer",fontFamily:GEO,letterSpacing:2}}>{loading?"Ingresando...":"INGRESAR"}</button>
+        <div style={{marginTop:20,textAlign:"center",fontSize:11,color:"#94a3b8"}}>Trilla — Agenda Profesional</div>
+      </div>
+    </div>
+  );
+}
+
+function DailyBanner({tasks, today, visible, onClose}) {
+  const tareasHoy = tasks.filter(t => !t.completada && t.fecha === today);
+  const urgentesHoy = tareasHoy.filter(t => t.urgencia === "Alta");
+  const vencidasHoy = tasks.filter(t => !t.completada && t.fecha < today);
+  const [speaking, setSpeaking] = useState(false);
+  useEffect(() => {
+    const check = setInterval(() => setSpeaking(!!(window.speechSynthesis && window.speechSynthesis.speaking)), 200);
+    return () => clearInterval(check);
+  }, []);
+  const handleSpeak = () => {
+    if (window.speechSynthesis && window.speechSynthesis.speaking) { window.speechSynthesis.cancel(); return; }
+    let msg = "Buen dia chicos, como estan? ";
+    if (tareasHoy.length === 0) msg += "No tienen tareas pendientes para hoy.";
+    else { msg += "Para hoy tienen " + tareasHoy.length + " tareas pendientes y " + urgentesHoy.length + " urgentes. "; if (vencidasHoy.length > 0) msg += "Ademas tienen " + vencidasHoy.length + " tareas vencidas. "; }
+    speakMessage(msg);
+  };
+  return (
+    <div style={{overflow:"hidden",maxHeight:visible?"180px":"0px",opacity:visible?1:0,transition:"max-height 0.45s cubic-bezier(0.4,0,0.2,1), opacity 0.3s ease"}}>
+      <div style={{background:"#003264",padding:"12px 16px",display:"flex",alignItems:"flex-start",gap:14,borderBottom:"1px solid #00285a"}}>
+        <div style={{flex:1}}>
+          <div style={{fontSize:13,fontWeight:700,color:"#f1f5f9",marginBottom:5,fontFamily:GEO}}>Buen dia chicos, como estan? 👋</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
+            {tareasHoy.length === 0
+              ? <span style={{fontSize:12,color:"#93c5fd"}}>No tienen tareas pendientes para hoy.</span>
+              : <span style={{fontSize:12,color:"#93c5fd"}}>Para hoy tienen <strong style={{color:"#fff"}}>{tareasHoy.length}</strong> tarea{tareasHoy.length!==1?"s":""} y <strong style={{color:"#fff"}}>{urgentesHoy.length}</strong> {urgentesHoy.length!==1?"son urgentes":"es urgente"}</span>
+            }
+            {vencidasHoy.length > 0 && <span style={{fontSize:11,background:"rgba(234,88,12,0.3)",color:"#fdba74",borderRadius:4,padding:"2px 8px",fontWeight:600}}>{vencidasHoy.length} vencida{vencidasHoy.length!==1?"s":""}</span>}
+          </div>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0}}>
+          <button onClick={handleSpeak} style={{background:speaking?"rgba(239,68,68,0.2)":"rgba(255,255,255,0.15)",border:"1px solid rgba(255,255,255,0.2)",borderRadius:6,color:"white",cursor:"pointer",fontSize:11,padding:"4px 10px",fontWeight:600,fontFamily:GEO}}>{speaking?"Detener":"Escuchar"}</button>
+          <button onClick={onClose} style={{background:"rgba(255,255,255,0.1)",border:"none",borderRadius:6,color:"#93c5fd",cursor:"pointer",fontSize:11,padding:"4px 10px",fontWeight:600,fontFamily:GEO}}>Cerrar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TaskDetailPanel({task, expandedTab, setExpandedTab, toggleSubtask, deleteSubtask, deleteComment, deleteNote, addNote, addComment, addSubtask, currentUser, inp}) {
+  const [localNote, setLocalNote] = useState("");
+  const [localComment, setLocalComment] = useState("");
+  const [localSubtask, setLocalSubtask] = useState("");
+  const tabs = [
+    {id:"subtareas", label:"Subtareas", count:(task.subtareas||[]).length},
+    {id:"comentarios", label:"Comentarios", count:(task.comentarios||[]).length},
+    {id:"notas", label:"Notas", count:(task.notas||[]).length},
+    {id:"historial", label:"Historial", count:(task.historial||[]).length},
+  ];
+  return (
+    <div style={{borderTop:"1px solid #e2e8f0",background:"#f8fafc",padding:"12px 14px"}}>
+      <div style={{display:"flex",gap:4,marginBottom:12,borderBottom:"1px solid #e2e8f0",paddingBottom:8}}>
+        {tabs.map(tab => (
+          <button key={tab.id} onClick={() => setExpandedTab(tab.id)} style={{padding:"4px 10px",borderRadius:5,border:"none",cursor:"pointer",fontSize:11,fontWeight:600,background:expandedTab===tab.id?"#003264":"transparent",color:expandedTab===tab.id?"white":"#64748b",fontFamily:GEO}}>
+            {tab.label}{tab.count > 0 ? " ("+tab.count+")" : ""}
+          </button>
+        ))}
+      </div>
+      {expandedTab === "subtareas" && (
+        <div>
+          {(task.subtareas||[]).length === 0 && <p style={{fontSize:12,color:"#94a3b8",margin:"0 0 8px"}}>Sin subtareas.</p>}
+          {(task.subtareas||[]).map(s => (
+            <div key={s.id} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:"1px solid #e2e8f0"}}>
+              <input type="checkbox" checked={s.completada} onChange={() => toggleSubtask(task.firebaseId,s.id)} style={{accentColor:"#003264",cursor:"pointer"}}/>
+              <span style={{flex:1,fontSize:12,color:s.completada?"#94a3b8":"#1e293b",textDecoration:s.completada?"line-through":"none"}}>{s.titulo}</span>
+              <button onClick={() => deleteSubtask(task.firebaseId,s.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#cbd5e1",fontSize:12}}>x</button>
+            </div>
+          ))}
+          <div style={{display:"flex",gap:6,marginTop:8}}>
+            <input value={localSubtask} onChange={e => setLocalSubtask(e.target.value)} onKeyDown={e => { if(e.key==="Enter"){ addSubtask(task.firebaseId,localSubtask); setLocalSubtask(""); }}} placeholder="Nueva subtarea..." style={{...inp,flex:1,fontSize:12}}/>
+            <button onClick={() => { addSubtask(task.firebaseId,localSubtask); setLocalSubtask(""); }} style={{padding:"6px 12px",borderRadius:6,border:"none",background:"#003264",color:"white",cursor:"pointer",fontSize:12,fontWeight:600}}>+</button>
+          </div>
+        </div>
+      )}
+      {expandedTab === "comentarios" && (
+        <div>
+          {(task.comentarios||[]).length === 0 && <p style={{fontSize:12,color:"#94a3b8",margin:"0 0 8px"}}>Sin comentarios.</p>}
+          {(task.comentarios||[]).map(c => (
+            <div key={c.id} style={{display:"flex",gap:8,marginBottom:8}}>
+              <Avatar nombre={c.usuario} size={26}/>
+              <div style={{flex:1,background:"white",borderRadius:6,padding:"7px 10px",border:"1px solid #e2e8f0"}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+                  <span style={{fontSize:11,fontWeight:700,color:"#1e293b"}}>{c.usuario}</span>
+                  <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                    <span style={{fontSize:10,color:"#94a3b8"}}>{c.fecha}</span>
+                    {c.usuario === currentUser.nombre && <button onClick={() => deleteComment(task.firebaseId,c.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#cbd5e1",fontSize:11}}>x</button>}
+                  </div>
+                </div>
+                <div style={{fontSize:12,color:"#334155"}}>{c.text}</div>
+              </div>
+            </div>
+          ))}
+          <div style={{display:"flex",gap:8,marginTop:4}}>
+            <Avatar nombre={currentUser.nombre} size={26}/>
+            <div style={{flex:1,display:"flex",gap:6}}>
+              <input value={localComment} onChange={e => setLocalComment(e.target.value)} onKeyDown={e => { if(e.key==="Enter"){ addComment(task.firebaseId,localComment); setLocalComment(""); }}} placeholder={"Comentar como "+currentUser.nombre+"..."} style={{...inp,flex:1,fontSize:12}}/>
+              <button onClick={() => { addComment(task.firebaseId,localComment); setLocalComment(""); }} style={{padding:"6px 12px",borderRadius:6,border:"none",background:"#003264",color:"white",cursor:"pointer",fontSize:12,fontWeight:600}}>OK</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {expandedTab === "notas" && (
+        <div>
+          {(task.notas||[]).length === 0 && <p style={{fontSize:12,color:"#94a3b8",margin:"0 0 8px"}}>Sin notas.</p>}
+          {(task.notas||[]).map(n => (
+            <div key={n.id} style={{display:"flex",justifyContent:"space-between",background:"white",borderRadius:5,padding:"7px 10px",marginBottom:5,border:"1px solid #e2e8f0",fontSize:12}}>
+              <div>
+                <div style={{color:"#1e293b"}}>{n.text}</div>
+                <div style={{color:"#94a3b8",fontSize:11,marginTop:2}}>{n.usuario} - {formatDate(n.fecha)}</div>
+              </div>
+              <button onClick={() => deleteNote(task.firebaseId,n.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#cbd5e1",fontSize:12}}>x</button>
+            </div>
+          ))}
+          <div style={{display:"flex",gap:6,marginTop:4}}>
+            <input value={localNote} onChange={e => setLocalNote(e.target.value)} onKeyDown={e => { if(e.key==="Enter"){ addNote(task.firebaseId,localNote); setLocalNote(""); }}} placeholder="Agregar nota..." style={{...inp,flex:1,fontSize:12}}/>
+            <button onClick={() => { addNote(task.firebaseId,localNote); setLocalNote(""); }} style={{padding:"6px 12px",borderRadius:6,border:"none",background:"#003264",color:"white",cursor:"pointer",fontSize:12,fontWeight:600}}>+</button>
+          </div>
+        </div>
+      )}
+      {expandedTab === "historial" && (
+        <div>
+          {(task.historial||[]).length === 0 && <p style={{fontSize:12,color:"#94a3b8",margin:0}}>Sin historial.</p>}
+          {[...(task.historial||[])].reverse().map(h => (
+            <div key={h.id} style={{display:"flex",gap:8,padding:"5px 0",borderBottom:"1px solid #f1f5f9"}}>
+              <div style={{width:6,height:6,borderRadius:"50%",background:"#003264",marginTop:5,flexShrink:0}}/>
+              <div>
+                <div style={{fontSize:12,color:"#1e293b"}}>{h.accion}</div>
+                <div style={{fontSize:11,color:"#94a3b8"}}>{h.usuario} - {h.fecha}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ===================== COTIZADOR =====================
+const CATS_COT=[
+  {key:'adicionales',label:'Adicionales',icon:'⚡',cls:'a',hasAbrev:true},
+  {key:'franqs',label:'Franq/Ded',icon:'📋',cls:'f',hasAbrev:false},
+  {key:'tipos',label:'Tipo Contrat.',icon:'📝',cls:'t',hasAbrev:false},
+];
+const PROVINCIAS_COT=['BUENOS AIRES','SANTA FE','CÓRDOBA','LA PAMPA','ENTRE RÍOS','SAN LUIS','SGO. DEL ESTERO'];
+
+function CotizadorApp() {
+  const [cotTab, setCotTab] = useState('consulta');
+  const [cotData, setCotData] = useState([]);
+  const [franqsGlobal, setFranqsGlobal] = useState([]);
+  const [cotizaciones, setCotizaciones] = useState([]);
+  const [cotConfig, setCotConfig] = useState({});
+  const [logoDataURL, setLogoDataURL] = useState('');
+  const [selCompany, setSelCompany] = useState('');
+  const [selCultivo, setSelCultivo] = useState('');
+  const [titular, setTitular] = useState('');
+  const [cuit, setCuit] = useState('');
+  const [filas, setFilas] = useState([{ha:'',depto:'',provincia:'',tasa:'',franq:'',resiembra:''}]);
+  const [adicSel, setAdicSel] = useState(new Set());
+  const [contratSel, setContratSel] = useState(new Set());
+  const [modal, setModal] = useState(null);
+  const [mCompanyName, setMCompanyName] = useState('');
+  const [mCultivoName, setMCultivoName] = useState('');
+  const [mCultivoDesc, setMCultivoDesc] = useState('');
+  const [mItemName, setMItemName] = useState('');
+  const [mItemDesc, setMItemDesc] = useState('');
+  const [mItemAbrev, setMItemAbrev] = useState('');
+  const [editCompanyIdx, setEditCompanyIdx] = useState(-1);
+  const [editCultivoCtx, setEditCultivoCtx] = useState({ci:-1,vi:-1});
+  const [editItemCtx, setEditItemCtx] = useState({ci:-1,vi:-1,catKey:'',ai:-1});
+  const [cfgEmpresa, setCfgEmpresa] = useState('');
+  const [cfgRubro, setCfgRubro] = useState('');
+  const [cfgTel, setCfgTel] = useState('');
+  const [cfgEmail, setCfgEmail] = useState('');
+  const [cfgCiudad, setCfgCiudad] = useState('');
+  const [cfgPie, setCfgPie] = useState('');
+  const [cfgSaved, setCfgSaved] = useState(false);
+  const [savedOk, setSavedOk] = useState(false);
+  const [dbStatus, setDbStatus] = useState('conectando');
+  const [importPreview, setImportPreview] = useState(null);
+
+  const { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc: fbDoc, setDoc } = window.__firebase;
+  const db = window.__db;
+
+  useEffect(() => {
+    const unsub1 = onSnapshot(fbDoc(db, 'cotizador_config', 'main'), (d) => {
+      if (d.exists()) {
+        const data = d.data();
+        if (data.companies) setCotData(data.companies);
+        if (data.franqs) setFranqsGlobal(data.franqs);
+        if (data.config) {
+          setCotConfig(data.config);
+          setCfgEmpresa(data.config.empresa||'');
+          setCfgRubro(data.config.rubro||'');
+          setCfgTel(data.config.tel||'');
+          setCfgEmail(data.config.email||'');
+          setCfgCiudad(data.config.ciudad||'');
+          setCfgPie(data.config.pie||'');
+        }
+        if (data.logo) setLogoDataURL(data.logo);
+      }
+      setDbStatus('conectado');
+    }, () => setDbStatus('error'));
+
+    const unsub2 = onSnapshot(collection(db, 'cotizaciones'), (snap) => {
+      const data = snap.docs.map(d => ({...d.data(), firebaseId: d.id}));
+      data.sort((a,b) => (b.timestamp||0) - (a.timestamp||0));
+      setCotizaciones(data);
+    });
+
+    return () => { unsub1(); unsub2(); };
+  }, []);
+
+  const persistDB = async (companies, franqs) => {
+    const cfg = {empresa:cfgEmpresa,rubro:cfgRubro,tel:cfgTel,email:cfgEmail,ciudad:cfgCiudad,pie:cfgPie};
+    await setDoc(fbDoc(db, 'cotizador_config', 'main'), {
+      companies: companies !== undefined ? companies : cotData,
+      franqs: franqs !== undefined ? franqs : franqsGlobal,
+      config: cotConfig, logo: logoDataURL
+    });
+  };
+
+  const saveConfigCot = async () => {
+    const cfg = {empresa:cfgEmpresa,rubro:cfgRubro,tel:cfgTel,email:cfgEmail,ciudad:cfgCiudad,pie:cfgPie};
+    await setDoc(fbDoc(db, 'cotizador_config', 'main'), {
+      companies: cotData, franqs: franqsGlobal, config: cfg, logo: logoDataURL
+    });
+    setCotConfig(cfg);
+    setCfgSaved(true); setTimeout(()=>setCfgSaved(false), 2500);
+  };
+
+  const loadLogo = async (e) => {
+    const file = e.target.files[0]; if(!file) return;
+    const r = new FileReader();
+    r.onload = async ev => {
+      const logo = ev.target.result;
+      setLogoDataURL(logo);
+      await setDoc(fbDoc(db, 'cotizador_config', 'main'), {
+        companies: cotData, franqs: franqsGlobal, config: cotConfig, logo
+      });
+    };
+    r.readAsDataURL(file);
+  };
+
+  const co = selCompany !== '' ? cotData[selCompany] : null;
+  const cu = co && selCultivo !== '' ? co.cultivos[selCultivo] : null;
+
+  const buildCoberturas = () => {
+    let cob = 'G+I+IR+R';
+    if (cu) adicSel.forEach(name => { const ad=(cu.adicionales||[]).find(a=>a.name===name); if(ad&&ad.abrev) cob+='+'+ad.abrev.toUpperCase(); });
+    return cob;
+  };
+  const toggleAdic = (name) => { const s=new Set(adicSel); s.has(name)?s.delete(name):s.add(name); setAdicSel(s); };
+  const toggleContrat = (key) => { const s=new Set(contratSel); s.has(key)?s.delete(key):s.add(key); setContratSel(s); };
+  const onCompanyChange = (v) => { setSelCompany(v); setSelCultivo(''); setAdicSel(new Set()); setContratSel(new Set()); setFilas([{ha:'',depto:'',provincia:'',tasa:'',franq:'',resiembra:''}]); };
+  const onCultivoChange = (v) => { setSelCultivo(v); setAdicSel(new Set()); setFilas([{ha:'',depto:'',provincia:'',tasa:'',franq:'',resiembra:''}]); };
+  const setFila = (i, campo, valor) => setFilas(filas.map((row,idx)=>idx===i?{...row,[campo]:valor}:row));
+
+  const saveCompany = async () => {
+    if(!mCompanyName.trim()) return;
+    let d = [...cotData];
+    if(editCompanyIdx>=0) d[editCompanyIdx].name=mCompanyName;
+    else d.push({id:Date.now(),name:mCompanyName,cultivos:[],resiembra:[],carencia:[],prorroga:'',contratacion:{}});
+    await persistDB(d, franqsGlobal); setModal(null);
+  };
+  const deleteCompany = async (ci) => {
+    if(!confirm('¿Eliminar?')) return;
+    await persistDB(cotData.filter((_,i)=>i!==ci), franqsGlobal);
+  };
+  const saveCultivo = async () => {
+    if(!mCultivoName.trim()||!mCultivoDesc.trim()) return;
+    let d = JSON.parse(JSON.stringify(cotData));
+    const {ci,vi} = editCultivoCtx;
+    if(vi>=0){d[ci].cultivos[vi].name=mCultivoName;d[ci].cultivos[vi].desc=mCultivoDesc;}
+    else{const base={id:Date.now(),name:mCultivoName,desc:mCultivoDesc,inicioCobertura:'',finVigencia:''};CATS_COT.forEach(cat=>base[cat.key]=[]);d[ci].cultivos.push(base);}
+    await persistDB(d, franqsGlobal); setModal(null);
+  };
+  const deleteCultivo = async (ci,vi) => {
+    if(!confirm('¿Eliminar?')) return;
+    let d=JSON.parse(JSON.stringify(cotData)); d[ci].cultivos.splice(vi,1);
+    await persistDB(d, franqsGlobal);
+  };
+  const saveItem = async () => {
+    if(!mItemName.trim()) return;
+    let d=JSON.parse(JSON.stringify(cotData));
+    const {ci,vi,catKey,ai}=editItemCtx;
+    const cat=CATS_COT.find(c=>c.key===catKey);
+    if(!d[ci].cultivos[vi][catKey])d[ci].cultivos[vi][catKey]=[];
+    const obj={name:mItemName,desc:mItemDesc};
+    if(cat.hasAbrev)obj.abrev=mItemAbrev.toUpperCase();
+    if(ai>=0)d[ci].cultivos[vi][catKey][ai]=obj;
+    else d[ci].cultivos[vi][catKey].push(obj);
+    await persistDB(d, franqsGlobal); setModal(null);
+  };
+  const deleteItem = async (ci,vi,catKey,ai) => {
+    if(!confirm('¿Eliminar?')) return;
+    let d=JSON.parse(JSON.stringify(cotData)); d[ci].cultivos[vi][catKey].splice(ai,1);
+    await persistDB(d, franqsGlobal);
+  };
+
+  const guardarCotizacion = async () => {
+    if(!co||!cu){alert('Seleccioná compañía y cultivo primero.');return;}
+    await addDoc(collection(db,'cotizaciones'),{
+      timestamp:Date.now(),
+      fecha:new Date().toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric'}),
+      titular:titular||'Sin titular', cuit:cuit||'—',
+      compania:co.name, cultivo:cu.name,
+      adicionales:Array.from(adicSel), contratacion:Array.from(contratSel),
+      filas:JSON.parse(JSON.stringify(filas)),
+    });
+    setSavedOk(true); setTimeout(()=>setSavedOk(false),2500);
+  };
+
+  const eliminarCotizacion = async (firebaseId) => {
+    if(!confirm('¿Eliminar esta cotización?')) return;
+    await deleteDoc(fbDoc(db,'cotizaciones',firebaseId));
+  };
+
+  const editarCotizacion = (c) => {
+    setTitular(c.titular!=='Sin titular'?c.titular:'');
+    setCuit(c.cuit!=='—'?c.cuit:'');
+    const ci=cotData.findIndex(co=>co.name===c.compania);
+    if(ci===-1){alert('Compañía no encontrada.');return;}
+    setSelCompany(ci);
+    const vi=cotData[ci].cultivos.findIndex(cu=>cu.name===c.cultivo);
+    if(vi===-1){alert('Cultivo no encontrado.');return;}
+    setSelCultivo(vi);
+    setFilas(JSON.parse(JSON.stringify(c.filas)));
+    setAdicSel(new Set(c.adicionales||[]));
+    setContratSel(new Set(c.contratacion||[]));
+    setCotTab('consulta');
+  };
+
+  const generatePDF = (pTitular,pCuit,pCo,pCu,pFilas,pAdicSel,pContratSel) => {
+    const uT=pTitular!==undefined?pTitular:titular;
+    const uCuit=pCuit!==undefined?pCuit:cuit;
+    const uCo=pCo||co; const uCu=pCu||cu;
+    const uFilas=pFilas||filas;
+    const uAdicSel=pAdicSel||adicSel;
+    const uContratSel=pContratSel||contratSel;
+    if(!uCo||!uCu) return;
+    let cobStr='G+I+IR+R';
+    uAdicSel.forEach(name=>{const ad=(uCu.adicionales||[]).find(a=>a.name===name);if(ad&&ad.abrev)cobStr+='+'+ad.abrev.toUpperCase();});
+    const adicItems=Array.from(uAdicSel).map(name=>(uCu.adicionales||[]).find(a=>a.name===name)).filter(Boolean);
+    const ct=uCo.contratacion||{};
+    const carencia=(uCo.carencia||[])[0]||null;
+    const franqsUsadas=[];
+    uFilas.forEach(f=>{if(f.franq&&!franqsUsadas.includes(f.franq))franqsUsadas.push(f.franq);});
+    const jsPDF=window.jspdf.jsPDF;
+    const pdoc=new jsPDF({unit:'mm',format:'a4'});
+    const W=210,mg=18;
+    const fecha=new Date().toLocaleDateString('es-AR',{day:'2-digit',month:'long',year:'numeric'});
+    const ciudad=cotConfig.ciudad||'';
+    pdoc.setFillColor(0,45,90);pdoc.rect(0,0,W,30,'F');
+    if(logoDataURL){try{const img=new Image();img.src=logoDataURL;const ratio=img.width/img.height;const lH=24,lW=lH*ratio;pdoc.addImage(logoDataURL,'PNG',mg,3,lW,lH);}catch(e){}}
+    pdoc.setFontSize(10);pdoc.setFont(undefined,'normal');pdoc.setTextColor(255,255,255);
+    pdoc.text(ciudad?ciudad+', '+fecha:fecha,W-mg,16,{align:'right'});
+    pdoc.setFillColor(0,102,180);pdoc.rect(mg,32,W-mg*2,8,'F');
+    pdoc.setTextColor(255,255,255);pdoc.setFontSize(9.5);pdoc.setFont(undefined,'bold');
+    pdoc.text('COTIZACIÓN — '+uCu.name.toUpperCase(),W/2,37.5,{align:'center'});
+    pdoc.setFillColor(245,247,250);pdoc.rect(mg,42,W-mg*2,13,'F');
+    pdoc.setDrawColor(220,226,235);pdoc.setLineWidth(0.3);pdoc.rect(mg,42,W-mg*2,13,'S');
+    pdoc.setFillColor(26,46,74);pdoc.rect(mg,42,2,13,'F');
+    const third=(W-mg*2)/3;
+    pdoc.setDrawColor(210,218,228);pdoc.setLineWidth(0.25);
+    pdoc.line(mg+third,43,mg+third,54);pdoc.line(mg+third*2,43,mg+third*2,54);
+    const drawCell=(label,value,x)=>{pdoc.setFontSize(7.5);pdoc.setFont(undefined,'bold');pdoc.setTextColor(26,46,74);pdoc.text(label,x+4,47);pdoc.setFont(undefined,'normal');pdoc.setTextColor(50,65,85);pdoc.text(pdoc.splitTextToSize(value||'—',third-10),x+4,52);};
+    drawCell('TITULAR',uT,mg);drawCell('CUIT',uCuit,mg+third);drawCell('COMPAÑÍA',uCo.name,mg+third*2);
+    let y=62;const usable=W-mg*2;
+    const colW=[22,12,26,26,26,16,13,13],cols=[mg];
+    colW.forEach((w,i)=>{if(i>0)cols.push(cols[i-1]+colW[i-1]);});
+    const rowH=9;
+    pdoc.setFontSize(8.5);pdoc.setFont(undefined,'bold');pdoc.setTextColor(26,46,74);
+    pdoc.text('TABLA DE COTIZACIÓN',mg,y);pdoc.setDrawColor(26,46,74);pdoc.setLineWidth(0.4);pdoc.line(mg,y+1.5,W-mg,y+1.5);y+=6;
+    pdoc.setFillColor(26,46,74);pdoc.rect(mg,y,usable,rowH,'F');
+    pdoc.setTextColor(255,255,255);pdoc.setFontSize(6.5);pdoc.setFont(undefined,'bold');
+    ['Cultivo','Ha','Depto/Partido','Provincia','Coberturas','Tasa S/IVA','F/D','Resiembra'].forEach((h,i)=>pdoc.text(h,cols[i]+1.5,y+6));
+    y+=rowH;
+    uFilas.forEach((f,fi)=>{
+      if(y>265){pdoc.addPage();y=20;}
+      pdoc.setFillColor(fi%2===0?255:245,fi%2===0?255:247,fi%2===0?255:250);
+      pdoc.rect(mg,y,usable,rowH,'F');
+      pdoc.setDrawColor(220,226,235);pdoc.setLineWidth(0.25);pdoc.rect(mg,y,usable,rowH,'S');
+      pdoc.setTextColor(50,65,85);pdoc.setFontSize(7);pdoc.setFont(undefined,'normal');
+      [uCu.name,f.ha||'—',f.depto||'—',f.provincia||'—',cobStr,f.tasa||'—',f.franq||'—',f.resiembra?f.resiembra+'%':'—'].forEach((v,i)=>pdoc.text(pdoc.splitTextToSize(v,colW[i]-2),cols[i]+1.5,y+6));
+      y+=rowH;
+    });
+    pdoc.save('Cotizacion_'+uCu.name.replace(/\s+/g,'_')+'.pdf');
+  };
+
+  const descargarPDFHistorial = (c) => {
+    const ci=cotData.findIndex(co=>co.name===c.compania);
+    if(ci===-1){alert('Compañía no encontrada.');return;}
+    const vi=cotData[ci].cultivos.findIndex(cu=>cu.name===c.cultivo);
+    if(vi===-1){alert('Cultivo no encontrado.');return;}
+    generatePDF(c.titular!=='Sin titular'?c.titular:'',c.cuit!=='—'?c.cuit:'',cotData[ci],cotData[ci].cultivos[vi],c.filas,new Set(c.adicionales||[]),new Set(c.contratacion||[]));
+  };
+
+  const handleImport = (e) => {
+    const file=e.target.files[0]; if(!file) return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      try{const wb=window.XLSX.read(ev.target.result,{type:'binary'});setImportPreview(parseWorkbook(wb));}
+      catch(err){alert('Error: '+err.message);}
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  const parseWorkbook = (wb) => {
+    const result={companies:{},franqsGlobal:[]};
+    const ensureCo=(name)=>{const k=name.toLowerCase();if(!result.companies[k])result.companies[k]={name,cultivos:{},resiembra:[],carencia:[],prorroga:'',contratacion:{}};return result.companies[k];};
+    const ensureCu=(co,name)=>{const k=name.toLowerCase();if(!co.cultivos[k])co.cultivos[k]={name,desc:'',inicioCobertura:'',finVigencia:'',adicionales:[],franqs:[],tipos:[]};return co.cultivos[k];};
+    const getRows=(keywords)=>{const n=wb.SheetNames.find(n=>keywords.some(k=>n.toLowerCase().includes(k.toLowerCase())));if(!n)return[];const rows=window.XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,defval:'',raw:false});return rows.length>1?rows.slice(1):[];};
+    const getHeaders=(keywords)=>{const n=wb.SheetNames.find(n=>keywords.some(k=>n.toLowerCase().includes(k.toLowerCase())));if(!n)return[];const rows=window.XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,defval:'',raw:false});return rows.length?rows[0].map(h=>String(h).trim()):[];};
+    const cobHdrs=getHeaders(['cobertura']);
+    const iCultivo=cobHdrs.findIndex(h=>h.toLowerCase().includes('cultivo'));
+    const iCompania=cobHdrs.findIndex(h=>h.toLowerCase().includes('compa'));
+    const descCols=cobHdrs.map((h,i)=>i!==iCultivo&&i!==iCompania?{idx:i,name:h}:null).filter(Boolean);
+    getRows(['cobertura']).forEach(row=>{const cultivo=String(row[iCultivo]||'').trim(),compania=String(row[iCompania]||'').trim();if(!cultivo||!compania)return;const cu=ensureCu(ensureCo(compania),cultivo);cu.desc=descCols.filter(c=>String(row[c.idx]||'').trim()!=='').map(c=>'**'+c.name+':** '+String(row[c.idx]).trim()).join('\n');});
+    getRows(['resiembra']).forEach(row=>{const comp=String(row[0]||'').trim(),val=String(row[1]||'').trim().replace('%','').replace('R','');if(!comp||!val)return;const co=ensureCo(comp);if(!co.resiembra.includes(val))co.resiembra.push(val);});
+    getRows(['franq','ded']).forEach(row=>{const name=String(row[0]||'').trim(),desc=String(row[1]||'').trim();if(!name||!desc)return;if(!result.franqsGlobal.find(f=>f.name===name))result.franqsGlobal.push({name,desc});});
+    getRows(['carencia']).forEach(row=>{const comp=String(row[0]||'').trim(),granizo=String(row[1]||'').trim(),descGranizo=String(row[2]||'').trim(),adicionales=String(row[3]||'').trim(),descAdicionales=String(row[4]||'').trim();if(!comp||!granizo)return;ensureCo(comp).carencia.push({granizo,descGranizo,adicionales,descAdicionales});});
+    getRows(['inicio']).forEach(row=>{const cultivo=String(row[0]||'').trim(),comp=String(row[1]||'').trim(),inicio=String(row[2]||'').trim();if(!cultivo||!comp||!inicio)return;ensureCu(ensureCo(comp),cultivo).inicioCobertura=inicio;});
+    getRows(['fin']).forEach(row=>{const cultivo=String(row[0]||'').trim(),comp=String(row[1]||'').trim(),fin=String(row[2]||'').trim();if(!cultivo||!comp||!fin)return;ensureCu(ensureCo(comp),cultivo).finVigencia=fin;});
+    ['planchado','helada','viento'].forEach(tipo=>{getRows([tipo]).forEach(row=>{const comp=String(row[0]||'').trim();if(!comp)return;const co=ensureCo(comp);const adic={name:String(row[2]||'').trim()||tipo,abrev:String(row[1]||'').trim(),tipo:String(row[2]||'').trim(),deducible:String(row[3]||'').trim(),carencia:String(row[4]||'').trim(),inicioVig:String(row[5]||'').trim(),finVig:String(row[6]||'').trim(),etapa:String(row[7]||'').trim(),limGeo:String(row[8]||'').trim(),suscripcion:String(row[9]||'').trim()};Object.values(co.cultivos).forEach(cu=>{if(!cu.adicionales.find(a=>a.name===adic.name&&a.deducible===adic.deducible))cu.adicionales.push(adic);});});});
+    getRows(['prorroga','prórroga']).forEach(row=>{const comp=String(row[0]||'').trim(),val=String(row[1]||'').trim();if(!comp||!val)return;ensureCo(comp).prorroga=val;});
+    getRows(['contrat']).forEach(row=>{const comp=String(row[0]||'').trim();if(!comp)return;ensureCo(comp).contratacion={pesos:String(row[1]||'').trim(),dolares:String(row[2]||'').trim(),quintales:String(row[3]||'').trim()};});
+    return result;
+  };
+
+  const executeImport = async () => {
+    if(!importPreview) return;
+    const companies=Object.values(importPreview.companies).map(co=>({id:Date.now()+Math.random(),name:co.name,resiembra:co.resiembra,carencia:co.carencia,prorroga:co.prorroga,contratacion:co.contratacion,cultivos:Object.values(co.cultivos).map(cu=>({id:Date.now()+Math.random(),name:cu.name,desc:cu.desc,inicioCobertura:cu.inicioCobertura,finVigencia:cu.finVigencia,adicionales:cu.adicionales,franqs:[],tipos:[]}))}));
+    const franqs=importPreview.franqsGlobal;
+    await setDoc(fbDoc(db,'cotizador_config','main'),{companies,franqs,config:cotConfig,logo:logoDataURL});
+    setImportPreview(null); setCotTab('datos');
+  };
+
+  const cob = buildCoberturas();
+  const adicItems = cu ? Array.from(adicSel).map(name=>(cu.adicionales||[]).find(a=>a.name===name)).filter(Boolean) : [];
+  const inp2={width:"100%",padding:"8px 11px",borderRadius:6,border:"1px solid #d0dce8",fontSize:13,color:"#1a2e4a",background:"#f8fafc",boxSizing:"border-box",outline:"none",fontFamily:"inherit"};
+  const sel2={...inp2,cursor:"pointer"};
+  const lbl2={fontSize:11,color:"#4a6080",display:"block",marginBottom:4,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4};
+  const card2={background:"white",borderRadius:10,padding:20,boxShadow:"0 2px 8px rgba(26,46,74,.08)",marginBottom:16,border:"1px solid #e2e8f0"};
+  const cardTitle2={fontSize:15,fontWeight:700,color:"#1a2e4a",marginBottom:14,display:"flex",alignItems:"center",gap:8,borderLeft:"3px solid #4a9fd4",paddingLeft:10};
+  const tabs2=[{id:'consulta',label:'🔍 Consulta'},{id:'historial',label:'📄 Cotizaciones'},{id:'datos',label:'🌱 Base de Datos'},{id:'importar',label:'📥 Importar'},{id:'config',label:'⚙️ Config'}];
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",height:"100%",overflow:"hidden"}}>
+      <div style={{display:"flex",background:"#152438",borderBottom:"1px solid #2d5a8e",flexShrink:0,overflowX:"auto"}}>
+        {tabs2.map(t=>(
+          <div key={t.id} onClick={()=>setCotTab(t.id)} style={{padding:"10px 16px",cursor:"pointer",color:cotTab===t.id?"#fff":"#7a9bbf",fontWeight:600,fontSize:12,borderBottom:cotTab===t.id?"3px solid #4a9fd4":"3px solid transparent",whiteSpace:"nowrap"}}>
+            {t.label}
+          </div>
+        ))}
+        <div style={{marginLeft:"auto",display:"flex",alignItems:"center",padding:"0 12px",gap:6}}>
+          <div style={{width:6,height:6,borderRadius:"50%",background:dbStatus==="conectado"?"#4ade80":dbStatus==="error"?"#f87171":"#fbbf24"}}/>
+          <span style={{fontSize:10,color:dbStatus==="conectado"?"#4ade80":"#fbbf24",fontWeight:600}}>{dbStatus==="conectado"?"Online":"Conectando..."}</span>
+        </div>
+      </div>
+
+      <div style={{flex:1,overflowY:"auto",padding:16}}>
+        {cotTab==='consulta' && (
+          <div>
+            <div style={card2}>
+              <div style={cardTitle2}>👤 Datos del Titular</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                <div><label style={lbl2}>Titular</label><input value={titular} onChange={e=>setTitular(e.target.value)} placeholder="Nombre completo o razón social" style={inp2}/></div>
+                <div><label style={lbl2}>CUIT</label><input value={cuit} onChange={e=>setCuit(e.target.value)} placeholder="Ej: 20-12345678-9" style={inp2}/></div>
+              </div>
+            </div>
+            <div style={card2}>
+              <div style={cardTitle2}>🏢 Compañía y Cultivo</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                <div><label style={lbl2}>Compañía</label>
+                  <select value={selCompany} onChange={e=>onCompanyChange(e.target.value)} style={sel2}>
+                    <option value="">-- Seleccioná --</option>
+                    {cotData.map((c,i)=><option key={i} value={i}>{c.name}</option>)}
+                  </select>
+                </div>
+                <div><label style={lbl2}>Cultivo</label>
+                  <select value={selCultivo} onChange={e=>onCultivoChange(e.target.value)} disabled={!co} style={sel2}>
+                    <option value="">-- Seleccioná --</option>
+                    {co && co.cultivos.map((c,i)=><option key={i} value={i}>{c.name}</option>)}
+                  </select>
+                </div>
+              </div>
+            </div>
+            {cu && (
+              <div style={card2}>
+                <div style={cardTitle2}>📊 Tabla de Cotización</div>
+                {filas.map((f,i)=>(
+                  <div key={i} style={{background:"#f8fafc",border:"1.5px solid #d0dce8",borderRadius:8,padding:12,marginBottom:8,position:"relative"}}>
+                    {filas.length>1 && <button onClick={()=>setFilas(filas.filter((_,idx)=>idx!==i))} style={{position:"absolute",top:8,right:8,background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:4,padding:"1px 8px",cursor:"pointer",fontSize:11,fontWeight:700}}>✕</button>}
+                    <div style={{fontSize:10,fontWeight:700,color:"#4a9fd4",marginBottom:8,textTransform:"uppercase"}}>FILA {i+1}</div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:8}}>
+                      <div><label style={lbl2}>Hectáreas</label><input value={f.ha} onChange={e=>setFila(i,'ha',e.target.value)} placeholder="Ej: 150" style={inp2}/></div>
+                      <div><label style={lbl2}>Depto / Partido</label><input value={f.depto} onChange={e=>setFila(i,'depto',e.target.value)} placeholder="Ej: Gral. Belgrano" style={inp2}/></div>
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+                      <div><label style={lbl2}>Provincia</label>
+                        <select value={f.provincia} onChange={e=>setFila(i,'provincia',e.target.value)} style={sel2}>
+                          <option value="">-- Seleccioná --</option>
+                          {PROVINCIAS_COT.map(p=><option key={p}>{p}</option>)}
+                        </select>
+                      </div>
+                      <div><label style={lbl2}>Tasa S/IVA</label><input value={f.tasa} onChange={e=>setFila(i,'tasa',e.target.value)} placeholder="Ej: 2.82%" style={inp2}/></div>
+                      <div><label style={lbl2}>Franq / Ded</label>
+                        <select value={f.franq} onChange={e=>setFila(i,'franq',e.target.value)} style={sel2}>
+                          <option value="">--</option>
+                          {franqsGlobal.map(fq=><option key={fq.name}>{fq.name}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                    <div style={{marginTop:10}}>
+                      <label style={lbl2}>Resiembra</label>
+                      <select value={f.resiembra} onChange={e=>setFila(i,'resiembra',e.target.value)} style={{...sel2,width:"33%"}}>
+                        <option value="">-- Sin resiembra --</option>
+                        {(co.resiembra||[]).map(r=><option key={r}>{r}%</option>)}
+                      </select>
+                    </div>
+                  </div>
+                ))}
+                <button onClick={()=>setFilas([...filas,{ha:'',depto:'',provincia:'',tasa:'',franq:'',resiembra:''}])} style={{width:"100%",padding:8,background:"#f0f7ff",color:"#4a9fd4",border:"1.5px dashed #4a9fd4",borderRadius:7,cursor:"pointer",fontSize:13,fontWeight:700}}>+ Agregar fila</button>
+              </div>
+            )}
+            {cu && (cu.adicionales||[]).length>0 && (
+              <div style={card2}>
+                <div style={cardTitle2}>⚡ Adicionales</div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:8,marginTop:6}}>
+                  {[...new Map((cu.adicionales||[]).map(a=>[a.name,a])).values()].map(a=>(
+                    <button key={a.name} onClick={()=>toggleAdic(a.name)} style={{border:"1.5px solid",borderRadius:7,padding:"7px 16px",cursor:"pointer",fontSize:13,fontWeight:600,background:adicSel.has(a.name)?"#1a2e4a":"#f8fafc",color:adicSel.has(a.name)?"white":"#4a6080",borderColor:adicSel.has(a.name)?"#1a2e4a":"#d0dce8",fontFamily:"inherit"}}>
+                      {a.name}{a.abrev&&<span style={{background:adicSel.has(a.name)?"rgba(255,255,255,0.2)":"#1a2e4a",color:"white",fontSize:9,borderRadius:3,padding:"1px 4px",marginLeft:4}}>+{a.abrev}</span>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {co && (co.contratacion?.pesos||co.contratacion?.dolares||co.contratacion?.quintales) && (
+              <div style={card2}>
+                <div style={cardTitle2}>💰 Tipo de Contratación</div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:8,marginTop:6}}>
+                  {['pesos','dolares','quintales'].filter(k=>co.contratacion[k]).map(k=>(
+                    <button key={k} onClick={()=>toggleContrat(k)} style={{border:"1.5px solid",borderRadius:7,padding:"7px 16px",cursor:"pointer",fontSize:13,fontWeight:600,background:contratSel.has(k)?"#2e7d52":"#f8fafc",color:contratSel.has(k)?"white":"#4a6080",borderColor:contratSel.has(k)?"#2e7d52":"#d0dce8",fontFamily:"inherit"}}>
+                      {k.charAt(0).toUpperCase()+k.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {cu && (
+              <div style={card2}>
+                <div style={cardTitle2}>📋 Resumen de Cotización</div>
+                <div style={{fontSize:11,color:"#4a9fd4",fontWeight:700,marginBottom:2,textTransform:"uppercase"}}>{co.name}</div>
+                <div style={{fontSize:20,fontWeight:700,color:"#1a2e4a",marginBottom:10}}>{cu.name}</div>
+                <div style={{overflowX:"auto",marginTop:14}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                    <thead><tr>{['Cultivo','Ha','Depto','Provincia','Coberturas','Tasa S/IVA','F/D','Resiembra'].map(h=><th key={h} style={{background:"#1a2e4a",color:"white",padding:"7px 8px",textAlign:"left"}}>{h}</th>)}</tr></thead>
+                    <tbody>{filas.map((f,i)=><tr key={i} style={{background:i%2===0?"white":"#f8fafc"}}><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{cu.name}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{f.ha||'—'}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{f.depto||'—'}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{f.provincia||'—'}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{cob}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{f.tasa||'—'}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{f.franq||'—'}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{f.resiembra?f.resiembra+'%':'—'}</td></tr>)}</tbody>
+                  </table>
+                </div>
+                <div style={{display:"flex",gap:10,marginTop:14}}>
+                  <button onClick={()=>generatePDF()} style={{flex:1,background:"#1a2e4a",color:"white",border:"none",borderRadius:8,padding:13,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>⬇️ Descargar PDF</button>
+                  <button onClick={guardarCotizacion} style={{padding:"13px 20px",background:"#2e7d52",color:"white",border:"none",borderRadius:8,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>💾 Guardar</button>
+                </div>
+                {savedOk&&<div style={{background:"#dcfce7",border:"1px solid #22c55e",borderRadius:7,padding:"8px 12px",marginTop:10,color:"#166534",fontWeight:700,fontSize:13}}>✅ Cotización guardada y sincronizada</div>}
+              </div>
+            )}
+          </div>
+        )}
+        {cotTab==='historial' && (
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <div style={{fontSize:17,fontWeight:700,color:"#1a2e4a"}}>Cotizaciones Guardadas</div>
+              <button onClick={async()=>{if(!confirm('¿Eliminar todas?'))return;for(const c of cotizaciones){await deleteDoc(fbDoc(db,'cotizaciones',c.firebaseId));}}} style={{background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:6,padding:"7px 12px",cursor:"pointer",fontSize:12,fontWeight:700}}>🗑️ Limpiar todo</button>
+            </div>
+            {cotizaciones.length===0&&<div style={{textAlign:"center",color:"#94a3b8",padding:24,fontSize:14,background:"white",borderRadius:10,border:"1px solid #e2e8f0"}}>No hay cotizaciones guardadas aún.</div>}
+            {cotizaciones.map((c)=>(
+              <div key={c.firebaseId} style={{background:"white",borderRadius:10,padding:"14px 16px",marginBottom:12,boxShadow:"0 2px 6px rgba(26,46,74,.07)",border:"1px solid #e2e8f0"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:11,color:"#4a9fd4",fontWeight:700,textTransform:"uppercase",marginBottom:4}}>{c.fecha}</div>
+                    <div style={{fontSize:16,fontWeight:700,color:"#1a2e4a",marginBottom:2}}>{c.titular}</div>
+                    <div style={{fontSize:12,color:"#64748b",marginBottom:6}}>CUIT: {c.cuit}</div>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                      <span style={{background:"#dbeafe",color:"#1e40af",fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:5}}>🏢 {c.compania}</span>
+                      <span style={{background:"#dcfce7",color:"#166534",fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:5}}>🌱 {c.cultivo}</span>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0}}>
+                    <button onClick={()=>descargarPDFHistorial(c)} style={{background:"#1a2e4a",color:"white",border:"none",borderRadius:6,padding:"7px 14px",cursor:"pointer",fontSize:12,fontWeight:700}}>⬇️ PDF</button>
+                    <button onClick={()=>editarCotizacion(c)} style={{background:"#dbeafe",color:"#1a4080",border:"none",borderRadius:6,padding:"7px 14px",cursor:"pointer",fontSize:12,fontWeight:700}}>✏️ Editar</button>
+                    <button onClick={()=>eliminarCotizacion(c.firebaseId)} style={{background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:6,padding:"7px 14px",cursor:"pointer",fontSize:12,fontWeight:700}}>🗑️</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {cotTab==='datos' && (
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <div style={{fontSize:17,fontWeight:700,color:"#1a2e4a"}}>Base de Datos</div>
+              <button onClick={()=>{setEditCompanyIdx(-1);setMCompanyName('');setModal('company');}} style={{background:"#1a2e4a",color:"white",border:"none",borderRadius:7,padding:"8px 16px",fontSize:13,fontWeight:700,cursor:"pointer"}}>+ Nueva Compañía</button>
+            </div>
+            {cotData.length===0&&<div style={{textAlign:"center",color:"#94a3b8",padding:24,fontSize:14,background:"white",borderRadius:10,border:"1px solid #e2e8f0"}}>No hay datos. Importá un Excel.</div>}
+            {cotData.map((company,ci)=>(
+              <div key={ci} style={{background:"white",borderRadius:10,padding:"14px 16px",marginBottom:12,boxShadow:"0 2px 6px rgba(26,46,74,.07)",border:"1px solid #e2e8f0"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                  <div style={{fontSize:15,fontWeight:700,color:"#1a2e4a"}}>🏢 {company.name}</div>
+                  <div style={{display:"flex",gap:5}}>
+                    <button onClick={()=>{setEditCompanyIdx(ci);setMCompanyName(company.name);setModal('company');}} style={{background:"#dbeafe",color:"#1a4080",border:"none",borderRadius:5,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>✏️</button>
+                    <button onClick={()=>deleteCompany(ci)} style={{background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:5,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>🗑️</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {cotTab==='importar' && (
+          <div style={card2}>
+            <div style={cardTitle2}>📥 Importar desde Excel</div>
+            <div onClick={()=>document.getElementById('fileImportCot').click()} style={{border:"2px dashed #4a9fd4",borderRadius:10,padding:30,textAlign:"center",background:"#f0f7ff",marginBottom:18,cursor:"pointer"}}>
+              <div style={{fontSize:32,marginBottom:8}}>📂</div>
+              <div style={{fontWeight:700,color:"#4a9fd4",fontSize:15}}>Clic para seleccionar el archivo</div>
+              <input type="file" id="fileImportCot" accept=".xlsx,.xls" style={{display:"none"}} onChange={handleImport}/>
+            </div>
+            {importPreview && (
+              <div>
+                <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:12,marginBottom:14}}>
+                  <div style={{fontWeight:700,color:"#1a2e4a"}}>{Object.keys(importPreview.companies).length} compañías. Franquicias: {importPreview.franqsGlobal.length}.</div>
+                </div>
+                <div style={{display:"flex",gap:10}}>
+                  <button onClick={executeImport} style={{background:"#4a9fd4",color:"white",border:"none",borderRadius:7,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>✅ Confirmar importación</button>
+                  <button onClick={()=>setImportPreview(null)} style={{background:"#e5e7eb",color:"#374151",border:"none",borderRadius:7,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>Cancelar</button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        {cotTab==='config' && (
+          <div style={card2}>
+            <div style={cardTitle2}>⚙️ Configuración del Membrete</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+              <div><label style={lbl2}>Nombre empresa</label><input value={cfgEmpresa} onChange={e=>setCfgEmpresa(e.target.value)} style={inp2}/></div>
+              <div><label style={lbl2}>Subtítulo</label><input value={cfgRubro} onChange={e=>setCfgRubro(e.target.value)} style={inp2}/></div>
+              <div><label style={lbl2}>Teléfono</label><input value={cfgTel} onChange={e=>setCfgTel(e.target.value)} style={inp2}/></div>
+              <div><label style={lbl2}>Email</label><input value={cfgEmail} onChange={e=>setCfgEmail(e.target.value)} style={inp2}/></div>
+              <div><label style={lbl2}>Ciudad (PDF)</label><input value={cfgCiudad} onChange={e=>setCfgCiudad(e.target.value)} style={inp2}/></div>
+              <div><label style={lbl2}>Texto al pie</label><input value={cfgPie} onChange={e=>setCfgPie(e.target.value)} style={inp2}/></div>
+            </div>
+            <button onClick={saveConfigCot} style={{background:"#2e7d52",color:"white",border:"none",borderRadius:7,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>💾 Guardar configuración</button>
+            {cfgSaved&&<div style={{color:"#2e7d52",fontSize:12,marginTop:7,fontWeight:700}}>✓ Guardado</div>}
+          </div>
+        )}
+      </div>
+      {modal==='company'&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(10,20,40,.6)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div style={{background:"white",borderRadius:12,padding:24,width:"95%",maxWidth:480}}>
+            <h3 style={{marginBottom:14,fontSize:16,fontWeight:700,color:"#1a2e4a"}}>{editCompanyIdx>=0?'Editar Compañía':'Nueva Compañía'}</h3>
+            <input value={mCompanyName} onChange={e=>setMCompanyName(e.target.value)} style={{...inp2,marginBottom:14}}/>
+            <div style={{display:"flex",gap:9}}>
+              <button onClick={saveCompany} style={{background:"#1a2e4a",color:"white",border:"none",borderRadius:7,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>💾 Guardar</button>
+              <button onClick={()=>setModal(null)} style={{background:"#e5e7eb",color:"#374151",border:"none",borderRadius:7,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+// ===================== FIN COTIZADOR =====================
+
+function App() {
+  const [loggedIn, setLoggedIn] = useState(false);
+  const [firebaseReady, setFirebaseReady] = useState(!!window.__firebaseReady);
+
+  useEffect(() => {
+    if (!window.__firebaseReady) {
+      window.addEventListener('firebaseReady', () => setFirebaseReady(true), {once:true});
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!firebaseReady) return;
+    const { onAuthStateChanged } = window.__firebase;
+    const unsub = onAuthStateChanged(window.__auth, (user) => {
+      setLoggedIn(!!user);
+    });
+    return () => unsub();
+  }, [firebaseReady]);
+
+  const handleLogout = async () => {
+    const { signOut } = window.__firebase;
+    await signOut(window.__auth);
+    localStorage.removeItem("trilla_session");
+  };
+
+  if (!firebaseReady) return (
+    <div style={{minHeight:"100vh",background:"#003264",display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div style={{color:"white",fontSize:16,fontFamily:GEO,letterSpacing:2}}>Conectando...</div>
+    </div>
+  );
+  if (!loggedIn) return <LoginScreen onLogin={() => {}}/>;
+  return <MainApp handleLogout={handleLogout}/>;
+}
+
+function MainApp({handleLogout}) {
+  const [view, setView] = useState("agenda");
+  const [tasks, setTasks] = useState([]);
+  const [tags, setTags] = useState(DEFAULT_TAGS);
+  const [users, setUsers] = useState(DEFAULT_USERS);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [editId, setEditId] = useState(null);
+  const [filterUrgencia, setFilterUrgencia] = useState("Todas");
+  const [filterEstado, setFilterEstado] = useState("Todas");
+  const [filterTag, setFilterTag] = useState("Todas");
+  const [filterUser, setFilterUser] = useState("Todos");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [calDate, setCalDate] = useState(new Date());
+  const [selectedDay, setSelectedDay] = useState(null);
+  const [newTagLabel, setNewTagLabel] = useState("");
+  const [newTagColor, setNewTagColor] = useState(TAG_COLORS[0]);
+  const [editTagId, setEditTagId] = useState(null);
+  const [newUserName, setNewUserName] = useState("");
+  const [newUserInitials, setNewUserInitials] = useState("");
+  const [newUserColor, setNewUserColor] = useState(AVATAR_COLORS[0]);
+  const [editUserId, setEditUserId] = useState(null);
+  const [expandedTask, setExpandedTask] = useState(null);
+  const [expandedTab, setExpandedTab] = useState("subtareas");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState("");
+  const [voicePreview, setVoicePreview] = useState(null);
+  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [mostrarMas, setMostrarMas] = useState(false);
+
+  const toggleFijada = async (firebaseId) => {
+    const db = getDb();
+    const task = tasks.find(t => t.firebaseId === firebaseId);
+    if (!task) return;
+    const fijada = !task.fijada;
+    const hist = [...(task.historial||[]), {id:Date.now(),accion:fijada?"Tarea fijada":"Tarea desfijada",usuario:(currentUser?.nombre||"Sistema"),fecha:nowStr()}];
+    await updateDoc(doc(db, "tasks", firebaseId), {fijada, historial:hist});
+  };
+  const [showDailyBanner, setShowDailyBanner] = useState(false);
+  const [bannerVisible, setBannerVisible] = useState(false);
+  const [dbStatus, setDbStatus] = useState("conectando");
+  const recognitionRef = useRef(null);
+
+  const emptyForm = {titulo:"",descripcion:"",urgencia:"Media",fecha:todayStr(),completada:false,esperando:false,tagIds:[],notas:[],recurrencia:"No repetir",responsableId:null,subtareas:[],comentarios:[],historial:[],creadaEl:todayStr()};
+  const [form, setForm] = useState(emptyForm);
+  const isMobile = windowWidth < 768;
+
+  const getDb = () => window.__db;
+  const { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc } = window.__firebase;
+
+  useEffect(() => { const h = () => setWindowWidth(window.innerWidth); window.addEventListener("resize",h); return () => window.removeEventListener("resize",h); },[]);
+
+  useEffect(() => {
+    const db = getDb();
+    const unsub = onSnapshot(collection(db, "tasks"), (snapshot) => {
+      const data = snapshot.docs.map(d => ({...d.data(), firebaseId: d.id}));
+      setTasks(data);
+      setDbStatus("conectado");
+    }, (err) => { console.error(err); setDbStatus("error"); });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    const db = getDb();
+    const unsub = onSnapshot(doc(db, "config", "main"), (d) => {
+      if (d.exists()) {
+        const data = d.data();
+        if (data.tags) setTags(data.tags);
+        if (data.users) setUsers(data.users);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  const saveConfig = async (newTags, newUsers) => {
+    const db = getDb();
+    await setDoc(doc(db, "config", "main"), { tags: newTags || tags, users: newUsers || users });
+  };
+
+  useEffect(() => {
+    const lastSeen = localStorage.getItem("agenda_daily_banner");
+    if (lastSeen !== todayStr()) { setTimeout(() => { setShowDailyBanner(true); setTimeout(() => setBannerVisible(true), 50); }, 600); }
+  },[]);
+
+  const closeDailyBanner = () => { setBannerVisible(false); setTimeout(() => setShowDailyBanner(false),450); localStorage.setItem("agenda_daily_banner",todayStr()); };
+  const openDailyBanner = () => { setShowDailyBanner(true); setTimeout(() => setBannerVisible(true),50); };
+
+  const saveTask = async () => {
+    if (!form.titulo.trim()) return;
+    const db = getDb();
+    if (editId !== null) {
+      const task = tasks.find(t => t.firebaseId === editId);
+      const hist = [...(task?.historial||[]), {id:Date.now(),accion:"Tarea editada",usuario:currentUser.nombre,fecha:nowStr()}];
+      await updateDoc(doc(db, "tasks", editId), {...form, historial: hist});
+      setEditId(null);
+    } else {
+      await addDoc(collection(db, "tasks"), {...form, id:Date.now(), notas:[], comentarios:[], subtareas:[], historial:[{id:Date.now(),accion:"Tarea creada",usuario:currentUser.nombre,fecha:nowStr()}]});
+    }
+    setForm(emptyForm); setShowForm(false);
+  };
+
+  const deleteTask = (firebaseId) => setConfirmDelete(firebaseId);
+  const confirmDeleteTask = async () => {
+    const db = getDb();
+    await deleteDoc(doc(db, "tasks", confirmDelete));
+    setConfirmDelete(null);
+  };
+
+  const toggleTask = async (firebaseId) => {
+    const db = getDb();
+    const task = tasks.find(t => t.firebaseId === firebaseId);
+    if (!task) return;
+    const completada = !task.completada;
+    const h = {id:Date.now(),accion:completada?"Marcada como completada":"Reabierta",usuario:currentUser.nombre,fecha:nowStr()};
+    const hist = [...(task.historial||[]), h];
+    if (completada && task.recurrencia && task.recurrencia !== "No repetir") {
+      await updateDoc(doc(db, "tasks", firebaseId), {completada:true, completadaEl:todayStr(), historial:hist});
+      await addDoc(collection(db, "tasks"), {...task, firebaseId:undefined, id:Date.now(), fecha:nextRecurrence(task.fecha,task.recurrencia), completada:false, esperando:false, notas:[], comentarios:[], historial:[{id:Date.now(),accion:"Generada automaticamente",usuario:"Sistema",fecha:nowStr()}]});
+    } else {
+      await updateDoc(doc(db, "tasks", firebaseId), {completada, completadaEl:completada?todayStr():null, historial:hist});
+    }
+  };
+
+  const toggleEsperando = async (firebaseId) => {
+    const db = getDb();
+    const task = tasks.find(t => t.firebaseId === firebaseId);
+    if (!task) return;
+    const esp = !task.esperando;
+    const hist = [...(task.historial||[]), {id:Date.now(),accion:esp?"Esperando respuesta":"Quitado estado Esperando",usuario:currentUser.nombre,fecha:nowStr()}];
+    await updateDoc(doc(db, "tasks", firebaseId), {esperando:esp, completada:false, historial:hist});
+  };
+
+  const editTask = (t) => { setForm({titulo:t.titulo,descripcion:t.descripcion,urgencia:t.urgencia,fecha:t.fecha,completada:t.completada,esperando:t.esperando,tagIds:t.tagIds||[],notas:t.notas||[],recurrencia:t.recurrencia||"No repetir",responsableId:t.responsableId||null,subtareas:t.subtareas||[],comentarios:t.comentarios||[],historial:t.historial||[],creadaEl:t.creadaEl||todayStr()}); setEditId(t.firebaseId); setShowForm(true); };
+
+  const addNote = async (firebaseId, text) => {
+    const tx = (text||"").trim(); if(!tx) return;
+    const db = getDb();
+    const task = tasks.find(t => t.firebaseId === firebaseId);
+    const notas = [...(task.notas||[]), {id:Date.now(),text:tx,fecha:todayStr(),usuario:currentUser.nombre}];
+    const hist = [...(task.historial||[]), {id:Date.now(),accion:"Nota agregada",usuario:currentUser.nombre,fecha:nowStr()}];
+    await updateDoc(doc(db, "tasks", firebaseId), {notas, historial:hist});
+  };
+  const deleteNote = async (firebaseId, nid) => {
+    const db = getDb();
+    const task = tasks.find(t => t.firebaseId === firebaseId);
+    await updateDoc(doc(db, "tasks", firebaseId), {notas:(task.notas||[]).filter(n=>n.id!==nid)});
+  };
+  const addComment = async (firebaseId, text) => {
+    const tx = (text||"").trim(); if(!tx) return;
+    const db = getDb();
+    const task = tasks.find(t => t.firebaseId === firebaseId);
+    const comentarios = [...(task.comentarios||[]), {id:Date.now(),text:tx,fecha:nowStr(),usuario:currentUser.nombre}];
+    const hist = [...(task.historial||[]), {id:Date.now(),accion:"Comentario de "+currentUser.nombre,usuario:currentUser.nombre,fecha:nowStr()}];
+    await updateDoc(doc(db, "tasks", firebaseId), {comentarios, historial:hist});
+  };
+  const deleteComment = async (firebaseId, cid) => {
+    const db = getDb();
+    const task = tasks.find(t => t.firebaseId === firebaseId);
+    await updateDoc(doc(db, "tasks", firebaseId), {comentarios:(task.comentarios||[]).filter(c=>c.id!==cid)});
+  };
+  const addSubtask = async (firebaseId, text) => {
+    const tx = (text||"").trim(); if(!tx) return;
+    const db = getDb();
+    const task = tasks.find(t => t.firebaseId === firebaseId);
+    const subtareas = [...(task.subtareas||[]), {id:Date.now(),titulo:tx,completada:false}];
+    const hist = [...(task.historial||[]), {id:Date.now(),accion:"Subtarea agregada: "+tx,usuario:currentUser.nombre,fecha:nowStr()}];
+    await updateDoc(doc(db, "tasks", firebaseId), {subtareas, historial:hist});
+  };
+  const toggleSubtask = async (firebaseId, sid) => {
+    const db = getDb();
+    const task = tasks.find(t => t.firebaseId === firebaseId);
+    const subtareas = (task.subtareas||[]).map(s => s.id===sid?{...s,completada:!s.completada}:s);
+    const sub = subtareas.find(s => s.id===sid);
+    const hist = [...(task.historial||[]), {id:Date.now(),accion:"Subtarea: "+sub.titulo+" "+(sub.completada?"completada":"reabierta"),usuario:currentUser.nombre,fecha:nowStr()}];
+    await updateDoc(doc(db, "tasks", firebaseId), {subtareas, historial:hist});
+  };
+  const deleteSubtask = async (firebaseId, sid) => {
+    const db = getDb();
+    const task = tasks.find(t => t.firebaseId === firebaseId);
+    await updateDoc(doc(db, "tasks", firebaseId), {subtareas:(task.subtareas||[]).filter(s=>s.id!==sid)});
+  };
+
+  const saveTag = async () => {
+    if(!newTagLabel.trim()) return;
+    let newTags;
+    if(editTagId!==null){ newTags=tags.map(g=>g.id===editTagId?{...g,label:newTagLabel,color:newTagColor}:g); setEditTagId(null); }
+    else newTags=[...tags,{id:Date.now(),label:newTagLabel,color:newTagColor}];
+    setTags(newTags); setNewTagLabel(""); setNewTagColor(TAG_COLORS[0]);
+    await saveConfig(newTags, null);
+  };
+  const deleteTag = async (id) => {
+    const newTags = tags.filter(g=>g.id!==id);
+    setTags(newTags);
+    await saveConfig(newTags, null);
+  };
+  const startEditTag = (g) => { setEditTagId(g.id); setNewTagLabel(g.label); setNewTagColor(g.color); };
+
+  const addUser = async () => {
+    if(!newUserName.trim()) return;
+    const initials = newUserInitials.trim() || newUserName.trim().slice(0,2).toUpperCase();
+    if(editUserId !== null) {
+      const newUsers = users.map(u => u.id===editUserId ? {...u, nombre:newUserName.trim(), initials, color:newUserColor} : u);
+      setUsers(newUsers);
+      await saveConfig(null, newUsers);
+      setEditUserId(null);
+    } else {
+      const newUsers = [...users, {id:Date.now(), nombre:newUserName.trim(), initials, color:newUserColor}];
+      setUsers(newUsers);
+      await saveConfig(null, newUsers);
+    }
+    setNewUserName(""); setNewUserInitials(""); setNewUserColor(AVATAR_COLORS[0]);
+  };
+  const startEditUser = (u) => { setEditUserId(u.id); setNewUserName(u.nombre); setNewUserInitials(u.initials||u.nombre.slice(0,2).toUpperCase()); setNewUserColor(u.color||AVATAR_COLORS[u.nombre.charCodeAt(0)%AVATAR_COLORS.length]); };
+
+  const startListening = () => { const SR=window.SpeechRecognition||window.webkitSpeechRecognition; if(!SR){setVoiceStatus("Tu navegador no soporta reconocimiento de voz.");return;} const r=new SR(); r.lang="es-AR"; r.interimResults=false; recognitionRef.current=r; r.onstart=()=>{setListening(true);setVoiceStatus("Escuchando...");}; r.onresult=e=>{const t=e.results[0][0].transcript;setVoicePreview({...parseVoiceText(t),original:t});setVoiceStatus("");setListening(false);}; r.onerror=e=>{setVoiceStatus(e.error==="not-allowed"?"Permiso denegado.":"No se pudo escuchar.");setListening(false);}; r.onend=()=>setListening(false); r.start(); };
+  const stopListening = () => { recognitionRef.current&&recognitionRef.current.stop(); setListening(false); setVoiceStatus(""); };
+  const confirmVoiceTask = async () => {
+    if(!voicePreview) return;
+    const db = getDb();
+    await addDoc(collection(db, "tasks"), {...emptyForm,...voicePreview,id:Date.now(),notas:[],comentarios:[],subtareas:[],historial:[{id:Date.now(),accion:"Tarea creada por voz",usuario:currentUser.nombre,fecha:nowStr()}]});
+    setVoicePreview(null); setVoiceStatus("Tarea creada."); setTimeout(()=>setVoiceStatus(""),3000);
+  };
+  const editVoiceTask = () => { if(!voicePreview)return; setForm({...emptyForm,...voicePreview}); setVoicePreview(null); setShowForm(true); setEditId(null); };
+
+  const today = todayStr();
+  const pendientes = tasks.filter(t => !t.completada).length;
+  const vencidas = tasks.filter(t => !t.completada && t.fecha < today).length;
+  const completadasCount = tasks.filter(t => t.completada).length;
+  const filteredTasks = tasks
+    .filter(t => filterUrgencia==="Todas"||t.urgencia===filterUrgencia)
+    .filter(t => filterEstado==="Todas"||(filterEstado==="Pendientes"?!t.completada:t.completada))
+    .filter(t => filterTag==="Todas"||(t.tagIds||[]).includes(Number(filterTag)))
+    .filter(t => filterUser==="Todos"||String(t.responsableId)===String(filterUser))
+    .filter(t => { if(!searchQuery.trim())return true; const q=searchQuery.toLowerCase(); return t.titulo.toLowerCase().includes(q)||(t.descripcion||"").toLowerCase().includes(q); })
+    .sort((a,b) => { if(!!b.fijada!==!!a.fijada) return a.fijada?-1:1; if(a.completada!==b.completada) return a.completada?1:-1; const u={Alta:0,Media:1,Baja:2}; if(u[a.urgencia]!==u[b.urgencia])return u[a.urgencia]-u[b.urgencia]; return (a.fecha||"").localeCompare(b.fecha||""); });
+
+  const calYear=calDate.getFullYear(), calMonth=calDate.getMonth();
+  const daysInMonth=getDaysInMonth(calYear,calMonth), firstDay=getFirstDayOfMonth(calYear,calMonth);
+  const MESES=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+  const DIAS_CAL=["Dom","Lun","Mar","Mie","Jue","Vie","Sab"];
+  const getDayStatus = (ds) => { const dt=tasks.filter(t=>t.fecha===ds&&!t.completada); if(dt.some(t=>t.urgencia==="Alta"))return"#334155"; if(dt.some(t=>t.urgencia==="Media"))return"#475569"; if(dt.length>0)return"#64748b"; return null; };
+  const selectedDayTasks = selectedDay ? tasks.filter(t => t.fecha===selectedDay) : [];
+
+  const inp = {width:"100%",padding:"8px 11px",borderRadius:6,border:"1px solid #e2e8f0",fontSize:13,color:"#1e293b",background:"#fff",boxSizing:"border-box",outline:"none"};
+  const sel = {...inp,cursor:"pointer"};
+  const lbl = {fontSize:11,color:"#64748b",display:"block",marginBottom:4,fontWeight:600,textTransform:"uppercase",letterSpacing:0.5};
+
+  // ── NAVEGACIÓN: se agrega "mails" entre cotizador y el separador ──
+  const navItems = [
+    {id:"agenda",    label:"Agenda",          icon:"📋", primary:true},
+    {id:"calendario",label:"Calendario",      icon:"▦",  primary:false},
+    {id:"usuarios",  label:"Usuarios",        icon:"◉",  primary:false},
+    {id:"etiquetas", label:"Etiquetas",       icon:"◈",  primary:false},
+    {id:"cotizador", label:"Cotizador",       icon:"🌾", primary:true,  separator:true},
+    {id:"mails",     label:"Control de Mails",icon:"✉",  primary:true,  separator:false},
+  ];
+
+  return (
+    <div style={{display:"flex",height:"100vh",fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#f1f5f9",overflow:"hidden",position:"relative"}}>
+
+      {/* SIDEBAR */}
+      <div style={{width:220,background:"#003264",flexShrink:0,display:"flex",flexDirection:"column",position:isMobile?"fixed":"relative",left:isMobile?(sidebarOpen?0:-220):0,top:0,bottom:0,zIndex:200,transition:"left 0.25s ease"}}>
+        <div style={{display:"flex",flexDirection:"column",height:"100%",overflowY:"auto"}}>
+          <div style={{padding:"22px 18px 16px"}}>
+            <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:14}}>
+              <div style={{width:38,height:38,borderRadius:10,background:"#00285a",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><TrillaLogo size={24} color="white"/></div>
+              <div>
+                <div style={{fontSize:14,fontWeight:700,color:"#f8fafc",letterSpacing:4,fontFamily:GEO}}>TRILLA</div>
+                <div style={{fontSize:10,color:"#6ea8d8"}}>{new Date().toLocaleDateString("es-AR",{day:"numeric",month:"short",year:"numeric"})}</div>
+              </div>
+            </div>
+            <div style={{background:"#00285a",borderRadius:10,padding:"10px 12px",display:"flex",alignItems:"center",gap:10}}>
+              {currentUser && <Avatar nombre={currentUser.nombre} initials={currentUser.initials} color={currentUser.color} size={32}/>}
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:10,color:"#6ea8d8",letterSpacing:0.8,textTransform:"uppercase",marginBottom:1}}>Usuario activo</div>
+                <div style={{fontSize:12,color:"#f1f5f9",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{currentUser?.nombre||"Sin usuario"}</div>
+              </div>
+            </div>
+            <select value={currentUser?.id||""} onChange={e => { if(e.target.value) setCurrentUser(users.find(u => u.id===Number(e.target.value))||null); }} style={{...sel,marginTop:8,fontSize:11,background:"#00285a",color:"#6ea8d8",border:"1px solid #00285a",borderRadius:7}}>
+              {users.map(u => <option key={u.id} value={u.id}>{u.nombre}</option>)}
+            </select>
+          </div>
+
+          <div style={{padding:"0 10px 10px"}}>
+            <div style={{fontSize:10,color:"#6ea8d8",marginBottom:6,paddingLeft:8,textTransform:"uppercase",letterSpacing:1}}>Navegacion</div>
+            {navItems.map(item => {
+              const isActive = view===item.id;
+              return (
+                <div key={item.id}>
+                  {item.separator && <div style={{height:1,background:"#00285a",margin:"6px 0"}}/>}
+                  <button
+                    onClick={()=>{setView(item.id);setSidebarOpen(false);}}
+                    style={{
+                      display:"flex",alignItems:"center",gap:10,width:"100%",
+                      padding:item.primary?"11px 12px":"7px 12px",
+                      borderRadius:7,
+                      border:item.primary?"1px solid "+(isActive?"rgba(255,255,255,0.25)":"rgba(255,255,255,0.08)"):"none",
+                      cursor:"pointer",marginBottom:item.primary?6:1,textAlign:"left",
+                      background:isActive?(item.primary?"rgba(255,255,255,0.18)":"rgba(255,255,255,0.12)"):(item.primary?"rgba(255,255,255,0.05)":"transparent"),
+                      color:isActive?"#ffffff":item.primary?"#c8dff0":"#6ea8d8",
+                      fontSize:item.primary?15:12,
+                      fontWeight:isActive?700:(item.primary?600:400),
+                      fontFamily:GEO,
+                    }}
+                  >
+                    <span style={{fontSize:item.primary?16:12}}>{item.icon}</span>
+                    {item.label}
+                    {item.id==="agenda"&&pendientes>0&&<span style={{marginLeft:"auto",fontSize:10,fontWeight:700,background:"#3b82f6",color:"white",borderRadius:10,padding:"1px 7px"}}>{pendientes}</span>}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{padding:"12px 14px",borderTop:"1px solid #00285a",marginTop:"auto"}}>
+            <div style={{fontSize:10,color:"#6ea8d8",marginBottom:8,textTransform:"uppercase",letterSpacing:1}}>Estadisticas</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+              {[["Pendientes",pendientes,"#60a5fa"],["Vencidas",vencidas,"#f87171"],["Completadas",completadasCount,"#4ade80"],["Total",tasks.length,"#94a3b8"]].map(([l,v,c]) => (
+                <div key={l} style={{background:"#00285a",borderRadius:8,padding:"10px 10px 8px"}}>
+                  <div style={{fontSize:18,fontWeight:700,color:c,lineHeight:1}}>{v}</div>
+                  <div style={{fontSize:10,color:"#6ea8d8",marginTop:3,textTransform:"uppercase",letterSpacing:0.5}}>{l}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={{padding:"8px 14px",borderTop:"1px solid #00285a"}}>
+            <div style={{display:"flex",alignItems:"center",gap:6,fontSize:11}}>
+              <div style={{width:6,height:6,borderRadius:"50%",background:dbStatus==="conectado"?"#4ade80":dbStatus==="error"?"#f87171":"#fbbf24",flexShrink:0}}/>
+              <span style={{color:dbStatus==="conectado"?"#4ade80":dbStatus==="error"?"#f87171":"#fbbf24"}}>{dbStatus==="conectado"?"Base de datos online":dbStatus==="error"?"Error de conexion":"Conectando..."}</span>
+            </div>
+          </div>
+          <div style={{padding:"12px 14px",borderTop:"1px solid #00285a"}}>
+            <button onClick={handleLogout} style={{width:"100%",padding:"8px",borderRadius:6,border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:"#6ea8d8",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:GEO,letterSpacing:1}}>CERRAR SESION</button>
+          </div>
+        </div>
+      </div>
+
+      {sidebarOpen&&isMobile&&<div onClick={()=>setSidebarOpen(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:199}}/>}
+
+      {confirmDelete&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div style={{background:"white",borderRadius:12,padding:24,maxWidth:360,width:"100%"}}>
+            <h3 style={{margin:"0 0 8px",fontSize:15,fontWeight:700,color:"#0f172a",textAlign:"center",fontFamily:GEO}}>Eliminar tarea?</h3>
+            <p style={{margin:"0 0 20px",fontSize:13,color:"#64748b",textAlign:"center"}}>Esta accion no se puede deshacer.</p>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>setConfirmDelete(null)} style={{flex:1,padding:"9px",borderRadius:7,border:"1px solid #e2e8f0",background:"white",cursor:"pointer",fontSize:13,color:"#64748b",fontWeight:600}}>Cancelar</button>
+              <button onClick={confirmDeleteTask} style={{flex:1,padding:"9px",borderRadius:7,border:"none",background:"#dc2626",color:"white",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:GEO}}>SI, ELIMINAR</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONTENIDO PRINCIPAL */}
+      <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",minWidth:0}}>
+        {showDailyBanner&&<DailyBanner tasks={tasks} today={today} visible={bannerVisible} onClose={closeDailyBanner}/>}
+
+        {/* TOPBAR */}
+        <div style={{background:"#fff",borderBottom:"1px solid #e2e8f0",padding:"11px 16px",display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+          {isMobile&&<button onClick={()=>setSidebarOpen(!sidebarOpen)} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#475569",padding:"2px 4px"}}>☰</button>}
+          <div style={{flex:1,display:"flex",alignItems:"center",gap:10}}>
+            <TrillaLogo size={20} color="#003264"/>
+            <h1 style={{margin:0,fontSize:15,fontWeight:700,color:"#0f172a",letterSpacing:1,fontFamily:GEO}}>
+              {view==="agenda"?"Gestión de Tareas":view==="calendario"?"Calendario":view==="usuarios"?"Usuarios":view==="cotizador"?"Cotizador Agrícola":view==="mails"?"Control de Mails":"Etiquetas"}
+            </h1>
+          </div>
+          <button onClick={openDailyBanner} style={{background:"#003264",color:"white",border:"none",borderRadius:6,padding:"7px 10px",cursor:"pointer",display:"flex",alignItems:"center",flexShrink:0}}>
+            <Icon d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9 M13.73 21a2 2 0 0 1-3.46 0" size={16}/>
+          </button>
+          {view==="agenda"&&<button onClick={()=>{setShowForm(true);setEditId(null);setForm(emptyForm);}} style={{background:"#003264",color:"white",border:"none",borderRadius:6,padding:"7px 14px",fontSize:13,fontWeight:600,cursor:"pointer",flexShrink:0,fontFamily:GEO}}>{isMobile?"+":"+ Nueva tarea"}</button>}
+        </div>
+
+        {(voiceStatus||voicePreview)&&(
+          <div style={{background:voicePreview?"#eff6ff":"#f0fdf4",borderBottom:"1px solid #e2e8f0",padding:"10px 16px"}}>
+            {voicePreview&&(
+              <div>
+                <div style={{fontSize:11,color:"#64748b",marginBottom:6,fontWeight:600,textTransform:"uppercase",fontFamily:GEO}}>Tarea detectada</div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:6,alignItems:"center",marginBottom:8}}>
+                  <span style={{fontSize:13,fontWeight:700,color:"#0f172a",fontFamily:GEO}}>"{voicePreview.titulo}"</span>
+                  <Badge label={voicePreview.urgencia} color={URGENCIAS.find(u=>u.label===voicePreview.urgencia).color}/>
+                  <span style={{fontSize:12,color:"#64748b"}}>{formatDate(voicePreview.fecha)}</span>
+                </div>
+                <div style={{display:"flex",gap:6}}>
+                  <button onClick={confirmVoiceTask} style={{padding:"6px 14px",borderRadius:6,border:"none",background:"#003264",color:"white",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:GEO}}>Confirmar</button>
+                  <button onClick={editVoiceTask} style={{padding:"6px 12px",borderRadius:6,border:"1px solid #bfdbfe",background:"white",color:"#1d4ed8",cursor:"pointer",fontSize:12}}>Editar</button>
+                  <button onClick={()=>setVoicePreview(null)} style={{padding:"6px 10px",borderRadius:6,border:"1px solid #e2e8f0",background:"white",color:"#64748b",cursor:"pointer",fontSize:12}}>Cancelar</button>
+                </div>
+              </div>
+            )}
+            {voiceStatus&&!voicePreview&&<div style={{fontSize:13,color:"#166534"}}>{voiceStatus}</div>}
+          </div>
+        )}
+
+        {/* Botón flotante de micrófono — solo en agenda */}
+        {view==="agenda" && (
+          <>
+            <button onClick={listening?stopListening:startListening} style={{position:"fixed",bottom:28,right:28,width:64,height:64,borderRadius:"50%",background:listening?"#ef4444":"#003264",color:"white",border:"none",cursor:"pointer",boxShadow:"0 4px 20px rgba(0,0,0,0.3)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:250,transition:"all 0.2s",transform:listening?"scale(1.1)":"scale(1)"}}>
+              {listening
+                ? <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+                : <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+              }
+            </button>
+            {listening && <div style={{position:"fixed",bottom:100,right:24,background:"#003264",color:"white",borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:600,fontFamily:GEO,boxShadow:"0 4px 12px rgba(0,0,0,0.2)",zIndex:250}}>Escuchando...</div>}
+          </>
+        )}
+
+        {/* ÁREA DE CONTENIDO */}
+        <div style={{flex:1,overflowY:"auto",padding:"16px"}}>
+
+          {/* ── CONTROL DE MAILS ── */}
+          {view==="mails" && <ControlMails/>}
+
+          {view==="agenda"&&(
+            <div>
+              <div style={{background:"white",borderRadius:8,padding:"10px 12px",marginBottom:14,border:"1px solid #e2e8f0"}}>
+                <div style={{position:"relative",marginBottom:8}}>
+                  <input value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="Buscar por titulo o descripcion..." style={{...inp,paddingLeft:12}}/>
+                  {searchQuery&&<button onClick={()=>setSearchQuery("")} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"#94a3b8",fontSize:14}}>x</button>}
+                </div>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  <select value={filterEstado} onChange={e=>setFilterEstado(e.target.value)} style={{...sel,width:"auto",minWidth:110,fontSize:12}}>{["Todas","Pendientes","Completadas"].map(o=><option key={o}>{o}</option>)}</select>
+                  <select value={filterUrgencia} onChange={e=>setFilterUrgencia(e.target.value)} style={{...sel,width:"auto",minWidth:100,fontSize:12}}>{["Todas","Alta","Media","Baja"].map(o=><option key={o}>{o}</option>)}</select>
+                  <select value={filterTag} onChange={e=>setFilterTag(e.target.value)} style={{...sel,width:"auto",minWidth:130,fontSize:12}}><option value="Todas">Todas las etiquetas</option>{tags.map(g=><option key={g.id} value={g.id}>{g.label}</option>)}</select>
+                  <select value={filterUser} onChange={e=>setFilterUser(e.target.value)} style={{...sel,width:"auto",minWidth:120,fontSize:12}}><option value="Todos">Todos los usuarios</option>{users.map(u=><option key={u.id} value={u.id}>{u.nombre}</option>)}</select>
+                </div>
+              </div>
+              {showForm&&(
+                <div style={{background:"white",borderRadius:8,padding:16,marginBottom:14,border:"1px solid #e2e8f0"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                    <h3 style={{margin:0,fontSize:14,fontWeight:700,color:"#0f172a",fontFamily:GEO}}>{editId?"Editar tarea":"Nueva tarea"}</h3>
+                    <button onClick={()=>{setShowForm(false);setEditId(null);setForm(emptyForm);}} style={{background:"none",border:"none",cursor:"pointer",color:"#94a3b8",fontSize:16}}>x</button>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:10}}>
+                    <div style={{gridColumn:"1/-1"}}><label style={lbl}>Titulo *</label><input placeholder="Titulo de la tarea" value={form.titulo} onChange={e=>setForm({...form,titulo:e.target.value})} style={inp}/></div>
+                    <div style={{gridColumn:"1/-1"}}><label style={lbl}>Descripcion</label><textarea placeholder="Descripcion opcional..." value={form.descripcion} onChange={e=>setForm({...form,descripcion:e.target.value})} rows={2} style={{...inp,resize:"vertical"}}/></div>
+                    <div><label style={lbl}>Urgencia</label><select value={form.urgencia} onChange={e=>setForm({...form,urgencia:e.target.value})} style={sel}>{URGENCIAS.map(u=><option key={u.label}>{u.label}</option>)}</select></div>
+                    <div><label style={lbl}>Fecha limite</label><input type="date" value={form.fecha} onChange={e=>setForm({...form,fecha:e.target.value})} style={inp}/></div>
+                    <div><label style={lbl}>Responsable</label><select value={form.responsableId||""} onChange={e=>setForm({...form,responsableId:e.target.value?Number(e.target.value):null})} style={sel}><option value="">Sin asignar</option>{users.map(u=><option key={u.id} value={u.id}>{u.nombre}</option>)}</select></div>
+                    <div><label style={lbl}>Recurrencia</label><select value={form.recurrencia} onChange={e=>setForm({...form,recurrencia:e.target.value})} style={sel}>{RECURRENCIA_OPTS.map(r=><option key={r}>{r}</option>)}</select></div>
+                    <div style={{gridColumn:"1/-1"}}><label style={lbl}>Etiquetas</label>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                        {tags.map(g=>{const s=(form.tagIds||[]).includes(g.id);return(<div key={g.id} onClick={()=>setForm({...form,tagIds:s?form.tagIds.filter(id=>id!==g.id):[...(form.tagIds||[]),g.id]})} style={{padding:"4px 12px",borderRadius:4,cursor:"pointer",fontSize:12,fontWeight:600,background:s?g.color:"#f1f5f9",color:s?"white":"#64748b",border:"1px solid "+(s?g.color:"#e2e8f0")}}>{g.label}</div>);})}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",gap:8,justifyContent:"flex-end",borderTop:"1px solid #e2e8f0",paddingTop:12,marginTop:10}}>
+                    <button onClick={()=>{setShowForm(false);setEditId(null);setForm(emptyForm);}} style={{padding:"7px 14px",borderRadius:6,border:"1px solid #e2e8f0",background:"white",cursor:"pointer",fontSize:13,color:"#64748b"}}>Cancelar</button>
+                    <button onClick={saveTask} style={{padding:"7px 16px",borderRadius:6,border:"none",background:"#003264",color:"white",cursor:"pointer",fontSize:13,fontWeight:600,fontFamily:GEO}}>{editId?"Guardar":"Crear tarea"}</button>
+                  </div>
+                </div>
+              )}
+              {filteredTasks.length===0&&(
+                <div style={{textAlign:"center",padding:"50px 20px",color:"#94a3b8"}}>
+                  <div style={{fontSize:13,fontWeight:600,color:"#cbd5e1",fontFamily:GEO}}>Sin tareas para mostrar</div>
+                </div>
+              )}
+              {(mostrarMas ? filteredTasks : filteredTasks.slice(0,15)).map((t)=>{
+                const urg=URGENCIAS.find(u=>u.label===t.urgencia)||URGENCIAS[1];
+                const isVencida=!t.completada&&t.fecha<today;
+                const isHoy=t.fecha===today&&!t.completada;
+                const taskTags=tags.filter(g=>(t.tagIds||[]).includes(g.id));
+                const responsable=users.find(u=>u.id===t.responsableId);
+                const isExpanded=expandedTask===t.firebaseId;
+                const subtasksTotal=(t.subtareas||[]).length;
+                const subtasksDone=(t.subtareas||[]).filter(s=>s.completada).length;
+                const headerBg=t.completada?"#94a3b8":isVencida?"#991b1b":(t.esperando&&!t.completada)?"#0f766e":urg.color;
+                return(
+                  <div key={t.firebaseId} style={{borderRadius:10,marginBottom:10,overflow:"hidden",boxShadow:"0 2px 10px rgba(15,23,42,0.09)",opacity:t.completada?0.7:1,border:"1px solid #e2e8f0"}}>
+                    <div style={{background:headerBg,padding:"10px 14px",display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{flex:1,fontWeight:700,fontSize:14,color:"#ffffff",textTransform:"uppercase",letterSpacing:0.5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textDecoration:t.completada?"line-through":"none",fontFamily:GEO}}>{t.titulo}</span>
+                      <div style={{display:"flex",gap:4,alignItems:"center",flexShrink:0,flexWrap:"wrap"}}>
+                        {t.fijada&&<StatusPill label="📌 FIJADA"/>}
+                        {isVencida&&<StatusPill label="VENCIDA"/>}
+                        {isHoy&&<StatusPill label="HOY"/>}
+                        {t.esperando&&!t.completada&&<StatusPill label="ESPERANDO"/>}
+                        {t.recurrencia&&t.recurrencia!=="No repetir"&&<StatusPill label={t.recurrencia.toUpperCase()}/>}
+                        <StatusPill label={t.urgencia.toUpperCase()}/>
+                      </div>
+                    </div>
+                    <div style={{background:"#ffffff",padding:"10px 14px",display:"flex",alignItems:"center",gap:10}}>
+                      <div style={{flex:1,minWidth:0}}>
+                        {t.descripcion&&<div style={{fontSize:12,color:"#64748b",marginBottom:5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descripcion}</div>}
+                        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                          <span style={{fontSize:11,color:"#94a3b8"}}>Vence: {formatDate(t.fecha)}</span>
+                          {t.creadaEl&&<span style={{fontSize:11,color:"#b0bec5",fontStyle:"italic"}}>{formatCreatedDate(t.creadaEl)}</span>}
+                          {t.completada&&t.completadaEl&&<span style={{fontSize:11,color:"#16a34a",fontWeight:600}}>Finalizada: {t.completadaEl===todayStr()?"Hoy":formatDate(t.completadaEl)}</span>}
+                          {responsable&&<div style={{display:"flex",alignItems:"center",gap:4}}><Avatar nombre={responsable.nombre} size={16}/><span style={{fontSize:11,color:"#64748b"}}>{responsable.nombre}</span></div>}
+                          {subtasksTotal>0&&<span style={{fontSize:11,color:"#64748b"}}>{subtasksDone}/{subtasksTotal} subtareas</span>}
+                          {(t.comentarios||[]).length>0&&<span style={{fontSize:11,color:"#64748b"}}>{t.comentarios.length} comentarios</span>}
+                          {taskTags.map(g=><Badge key={g.id} label={g.label} color={g.color}/>)}
+                        </div>
+                        {subtasksTotal>0&&(<div style={{height:3,background:"#e2e8f0",borderRadius:2,marginTop:5,maxWidth:140}}><div style={{height:3,background:headerBg,borderRadius:2,width:(subtasksDone/subtasksTotal*100)+"%",transition:"width 0.3s"}}/></div>)}
+                      </div>
+                      <div style={{display:"flex",gap:3,flexShrink:0,flexWrap:"wrap",justifyContent:"flex-end"}}>
+                        <ActionBtn onClick={()=>toggleFijada(t.firebaseId)} title={t.fijada?"Desfijar":"Fijar arriba"} active={!!t.fijada} activeColor="#f59e0b"><Icon d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/></ActionBtn>
+                        <ActionBtn onClick={()=>toggleTask(t.firebaseId)} title={t.completada?"Reabrir":"Completar"} active={t.completada} activeColor="#16a34a"><Icon d={t.completada?"M20 6L9 17l-5-5 M15 3h6v6":"M20 6L9 17l-5-5"}/></ActionBtn>
+                        <ActionBtn onClick={()=>toggleEsperando(t.firebaseId)} title="Esperando respuesta" active={t.esperando&&!t.completada} activeColor="#0f766e"><Icon d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2zm0 5v5l4 2"/></ActionBtn>
+                        <ActionBtn onClick={()=>{setExpandedTask(isExpanded?null:t.firebaseId);setExpandedTab("subtareas");}} title="Ver detalle" active={isExpanded} activeColor="#003264"><Icon d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2m-6 9l2 2 4-4"/></ActionBtn>
+                        <ActionBtn onClick={()=>editTask(t)} title="Editar"><Icon d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></ActionBtn>
+                        <ActionBtn onClick={()=>deleteTask(t.firebaseId)} title="Eliminar" danger><Icon d="M3 6h18M8 6V4h8v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></ActionBtn>
+                      </div>
+                    </div>
+                    {isExpanded&&<TaskDetailPanel task={t} expandedTab={expandedTab} setExpandedTab={setExpandedTab} toggleSubtask={toggleSubtask} deleteSubtask={deleteSubtask} deleteComment={deleteComment} deleteNote={deleteNote} addNote={addNote} addComment={addComment} addSubtask={addSubtask} currentUser={currentUser} inp={inp}/>}
+                  </div>
+                );
+              })}
+              {!mostrarMas && filteredTasks.length > 15 && (
+                <div style={{textAlign:"center",padding:"14px 0"}}>
+                  <button onClick={()=>setMostrarMas(true)} style={{padding:"9px 24px",borderRadius:7,border:"1px solid #e2e8f0",background:"white",cursor:"pointer",fontSize:13,fontWeight:600,color:"#003264",fontFamily:GEO}}>Mostrar {filteredTasks.length - 15} tareas más</button>
+                </div>
+              )}
+              {mostrarMas && filteredTasks.length > 15 && (
+                <div style={{textAlign:"center",padding:"14px 0"}}>
+                  <button onClick={()=>setMostrarMas(false)} style={{padding:"9px 24px",borderRadius:7,border:"1px solid #e2e8f0",background:"white",cursor:"pointer",fontSize:13,fontWeight:600,color:"#64748b",fontFamily:GEO}}>Mostrar menos</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {view==="calendario"&&(
+            <div style={{maxWidth:500}}>
+              <div style={{background:"white",borderRadius:8,padding:16,border:"1px solid #e2e8f0"}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+                  <button onClick={()=>setCalDate(new Date(calYear,calMonth-1,1))} style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:5,padding:"5px 12px",cursor:"pointer",fontSize:14}}>{"<"}</button>
+                  <span style={{fontWeight:700,fontSize:13,color:"#0f172a",textTransform:"uppercase",letterSpacing:1,fontFamily:GEO}}>{MESES[calMonth]} {calYear}</span>
+                  <button onClick={()=>setCalDate(new Date(calYear,calMonth+1,1))} style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:5,padding:"5px 12px",cursor:"pointer",fontSize:14}}>{">"}</button>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:4}}>
+                  {DIAS_CAL.map(d=><div key={d} style={{textAlign:"center",fontSize:10,fontWeight:700,color:"#94a3b8",padding:"3px 0",textTransform:"uppercase",fontFamily:GEO}}>{d}</div>)}
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}}>
+                  {Array.from({length:firstDay}).map((_,i)=><div key={"e"+i}/>)}
+                  {Array.from({length:daysInMonth}).map((_,i)=>{
+                    const day=i+1;
+                    const ds=calYear+"-"+String(calMonth+1).padStart(2,"0")+"-"+String(day).padStart(2,"0");
+                    const dotColor=getDayStatus(ds);
+                    const isToday=ds===today,isSel=ds===selectedDay;
+                    return(
+                      <div key={day} onClick={()=>setSelectedDay(isSel?null:ds)} style={{padding:"6px 2px",borderRadius:5,textAlign:"center",cursor:"pointer",background:isSel?"#003264":isToday?"#eff6ff":"transparent",border:isToday&&!isSel?"1px solid #bfdbfe":"1px solid transparent"}}>
+                        <div style={{fontSize:12,fontWeight:isToday?700:400,color:isSel?"white":isToday?"#003264":"#334155",fontFamily:GEO}}>{day}</div>
+                        {dotColor&&<div style={{width:5,height:5,borderRadius:"50%",background:isSel?"rgba(255,255,255,0.7)":dotColor,margin:"2px auto 0"}}/>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              {selectedDay&&(
+                <div style={{marginTop:14}}>
+                  <h3 style={{margin:"0 0 8px",fontSize:12,fontWeight:700,color:"#0f172a",textTransform:"uppercase",fontFamily:GEO}}>{formatDate(selectedDay)}</h3>
+                  {selectedDayTasks.length===0
+                    ?<div style={{textAlign:"center",padding:"16px",color:"#94a3b8",fontSize:12,background:"white",borderRadius:7,border:"1px solid #e2e8f0"}}>Sin tareas para este dia</div>
+                    :selectedDayTasks.map(t=>{
+                      const urg=URGENCIAS.find(u=>u.label===t.urgencia)||URGENCIAS[1];
+                      return(
+                        <div key={t.firebaseId} style={{borderRadius:8,marginBottom:6,overflow:"hidden",border:"1px solid #e2e8f0",opacity:t.completada?0.65:1}}>
+                          <div style={{background:t.completada?"#94a3b8":urg.color,padding:"7px 12px"}}><span style={{fontWeight:700,fontSize:13,color:"white",textTransform:"uppercase",fontFamily:GEO}}>{t.titulo}</span></div>
+                          <div style={{background:"white",padding:"8px 12px"}}><span style={{fontSize:11,color:"#94a3b8"}}>{t.completada?"Completada":"Pendiente"}</span></div>
+                        </div>
+                      );
+                    })
+                  }
+                  <button onClick={()=>{setView("agenda");setShowForm(true);setEditId(null);setForm({...emptyForm,fecha:selectedDay});setSidebarOpen(false);}} style={{width:"100%",padding:"9px",borderRadius:6,border:"1px dashed #bfdbfe",background:"transparent",color:"#003264",cursor:"pointer",fontSize:12,fontWeight:600,marginTop:4,fontFamily:GEO}}>+ Agregar tarea para este dia</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {view==="usuarios"&&(
+            <div style={{maxWidth:460}}>
+              <div style={{background:"white",borderRadius:8,padding:16,border:"1px solid #e2e8f0",marginBottom:14}}>
+                <h3 style={{margin:"0 0 12px",fontSize:13,fontWeight:700,color:"#0f172a",textTransform:"uppercase",letterSpacing:0.5,fontFamily:GEO}}>{editUserId?"Editar usuario":"Nuevo usuario"}</h3>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+                  <div style={{gridColumn:"1/-1"}}>
+                    <label style={lbl}>Nombre</label>
+                    <input value={newUserName} onChange={e=>{setNewUserName(e.target.value); if(!editUserId) setNewUserInitials(e.target.value.slice(0,2).toUpperCase());}} onKeyDown={e=>e.key==="Enter"&&addUser()} placeholder="Nombre del usuario" style={inp}/>
+                  </div>
+                  <div>
+                    <label style={lbl}>Iniciales (máx. 2)</label>
+                    <input value={newUserInitials} onChange={e=>setNewUserInitials(e.target.value.toUpperCase().slice(0,2))} placeholder="Ej: JD" maxLength={2} style={inp}/>
+                  </div>
+                  <div>
+                    <label style={lbl}>Vista previa</label>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginTop:2}}>
+                      <Avatar nombre={newUserName||"?"} initials={newUserInitials||"?"} color={newUserColor} size={36}/>
+                      <span style={{fontSize:12,color:"#64748b"}}>{newUserName||"Sin nombre"}</span>
+                    </div>
+                  </div>
+                  <div style={{gridColumn:"1/-1"}}>
+                    <label style={lbl}>Color</label>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                      {AVATAR_COLORS.map(c=>(
+                        <div key={c} onClick={()=>setNewUserColor(c)} style={{width:26,height:26,borderRadius:"50%",background:c,cursor:"pointer",border:newUserColor===c?"3px solid #0f172a":"3px solid transparent",boxSizing:"border-box"}}/>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div style={{display:"flex",gap:8,justifyContent:"flex-end",borderTop:"1px solid #e2e8f0",paddingTop:12}}>
+                  {editUserId&&<button onClick={()=>{setEditUserId(null);setNewUserName("");setNewUserInitials("");setNewUserColor(AVATAR_COLORS[0]);}} style={{padding:"7px 14px",borderRadius:6,border:"1px solid #e2e8f0",background:"white",cursor:"pointer",fontSize:13,color:"#64748b"}}>Cancelar</button>}
+                  <button onClick={addUser} style={{padding:"8px 16px",borderRadius:6,border:"none",background:"#003264",color:"white",cursor:"pointer",fontSize:13,fontWeight:600,fontFamily:GEO}}>{editUserId?"Guardar cambios":"Agregar"}</button>
+                </div>
+              </div>
+              <div style={{background:"white",borderRadius:8,border:"1px solid #e2e8f0",overflow:"hidden"}}>
+                {users.map((u,i)=>{
+                  const ta=tasks.filter(t=>t.responsableId===u.id).length;
+                  const pe=tasks.filter(t=>t.responsableId===u.id&&!t.completada).length;
+                  return(
+                    <div key={u.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",borderBottom:i<users.length-1?"1px solid #e2e8f0":"none"}}>
+                      <Avatar nombre={u.nombre} initials={u.initials} color={u.color} size={34}/>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:13,fontWeight:600,color:"#1e293b",fontFamily:GEO}}>{u.nombre}</div>
+                        <div style={{fontSize:11,color:"#94a3b8"}}>{ta} tareas - {pe} pendientes</div>
+                      </div>
+                      {users.length>1&&<ActionBtn onClick={async()=>{const nu=users.filter(x=>x.id!==u.id);setUsers(nu);await saveConfig(null,nu);}} title="Eliminar" danger><Icon d="M3 6h18M8 6V4h8v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></ActionBtn>}
+                      <ActionBtn onClick={()=>startEditUser(u)} title="Editar"><Icon d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></ActionBtn>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {view==="etiquetas"&&(
+            <div style={{maxWidth:460}}>
+              <div style={{background:"white",borderRadius:8,padding:16,border:"1px solid #e2e8f0",marginBottom:14}}>
+                <h3 style={{margin:"0 0 12px",fontSize:13,fontWeight:700,color:"#0f172a",textTransform:"uppercase",letterSpacing:0.5,fontFamily:GEO}}>{editTagId?"Editar etiqueta":"Nueva etiqueta"}</h3>
+                <label style={lbl}>Nombre</label>
+                <input value={newTagLabel} onChange={e=>setNewTagLabel(e.target.value)} placeholder="Nombre de la etiqueta" style={{...inp,marginBottom:10}}/>
+                <label style={lbl}>Color</label>
+                <div style={{display:"flex",gap:8,marginBottom:12}}>
+                  {TAG_COLORS.map(c=><div key={c} onClick={()=>setNewTagColor(c)} style={{width:22,height:22,borderRadius:4,background:c,cursor:"pointer",border:newTagColor===c?"2px solid #0f172a":"2px solid transparent"}}/>)}
+                </div>
+                <div style={{display:"flex",gap:8,justifyContent:"flex-end",borderTop:"1px solid #e2e8f0",paddingTop:12}}>
+                  {editTagId&&<button onClick={()=>{setEditTagId(null);setNewTagLabel("");setNewTagColor(TAG_COLORS[0]);}} style={{padding:"7px 14px",borderRadius:6,border:"1px solid #e2e8f0",background:"white",cursor:"pointer",fontSize:13,color:"#64748b"}}>Cancelar</button>}
+                  <button onClick={saveTag} style={{padding:"7px 16px",borderRadius:6,border:"none",background:"#003264",color:"white",cursor:"pointer",fontSize:13,fontWeight:600,fontFamily:GEO}}>{editTagId?"Actualizar":"Crear etiqueta"}</button>
+                </div>
+              </div>
+              <div style={{background:"white",borderRadius:8,border:"1px solid #e2e8f0",overflow:"hidden"}}>
+                {tags.length===0&&<div style={{padding:"20px",textAlign:"center",color:"#94a3b8",fontSize:13}}>No hay etiquetas</div>}
+                {tags.map((g,i)=>(
+                  <div key={g.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderBottom:i<tags.length-1?"1px solid #e2e8f0":"none"}}>
+                    <div style={{width:11,height:11,borderRadius:3,background:g.color,flexShrink:0}}/>
+                    <span style={{flex:1,fontSize:13,fontWeight:500,color:"#1e293b"}}>{g.label}</span>
+                    <span style={{fontSize:11,color:"#94a3b8"}}>{tasks.filter(t=>(t.tagIds||[]).includes(g.id)).length} tareas</span>
+                    <div style={{display:"flex",gap:4}}>
+                      <ActionBtn onClick={()=>startEditTag(g)} title="Editar"><Icon d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></ActionBtn>
+                      <ActionBtn onClick={()=>deleteTag(g.id)} title="Eliminar" danger><Icon d="M3 6h18M8 6V4h8v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></ActionBtn>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {view==="cotizador"&&<CotizadorApp/>}
+
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+</body>
+</html>
