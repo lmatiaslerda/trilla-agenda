@@ -818,6 +818,7 @@ function CotizadorApp() {
   const [cfgPie, setCfgPie] = useState('');
   const [cfgSaved, setCfgSaved] = useState(false);
   const [savedOk, setSavedOk] = useState(false);
+  const [observaciones, setObservaciones] = useState('');
   const [dbStatus, setDbStatus] = useState('conectando');
   const [importPreview, setImportPreview] = useState(null);
 
@@ -940,6 +941,65 @@ function CotizadorApp() {
     await persistDB(d, franqsGlobal);
   };
 
+  const exportarExcel = () => {
+    if(cotizaciones.length===0){alert('No hay cotizaciones para exportar.');return;}
+
+    // Ordenar por fecha de carga (timestamp)
+    const sorted=[...cotizaciones].sort((a,b)=>(a.timestamp||0)-(b.timestamp||0));
+
+    // Encabezados
+    const headers=[
+      'ID','Titular','CUIT','Compañía','Cultivo',
+      'Depto/Partido','Provincia','Ha',
+      'Adicionales','Tipo Contratación','Observaciones'
+    ];
+
+    // Filas — una por cada combinación fila/cotización
+    const rows=[];
+    let idCounter=1;
+    sorted.forEach(c=>{
+      const filas=c.filas&&c.filas.length>0?c.filas:[{depto:'',provincia:'',ha:''}];
+      const adicIniciales=(c.adicionales||[]).join(', ');
+      const contratTitulo=(c.contratacion||[]).map(k=>k.charAt(0).toUpperCase()+k.slice(1)).join(', ');
+      filas.forEach(f=>{
+        rows.push([
+          idCounter,
+          c.titular||'',
+          c.cuit||'',
+          c.compania||'',
+          c.cultivo||'',
+          f.depto||'',
+          f.provincia||'',
+          f.ha||'',
+          adicIniciales,
+          contratTitulo,
+          c.observaciones||''
+        ]);
+      });
+      idCounter++;
+    });
+
+    // Generar Excel usando SheetJS
+    const XLSX=window.XLSX;
+    if(!XLSX){alert('Error: librería XLSX no disponible.');return;}
+
+    const wsData=[headers,...rows];
+    const ws=XLSX.utils.aoa_to_sheet(wsData);
+
+    // Ancho de columnas
+    ws['!cols']=[
+      {wch:6},{wch:25},{wch:16},{wch:20},{wch:15},
+      {wch:18},{wch:15},{wch:8},
+      {wch:20},{wch:20},{wch:30}
+    ];
+
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,'Cotizaciones');
+
+    const fecha=new Date().toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric'}).replace(/\//g,'-');
+    XLSX.writeFile(wb,'Cotizaciones_Trilla_'+fecha+'.xlsx');
+  };
+
   const guardarCotizacion = async () => {
     if(!co||!cu){alert('Seleccioná compañía y cultivo primero.');return;}
     await addDoc(collection(db,'cotizaciones'),{
@@ -949,6 +1009,7 @@ function CotizadorApp() {
       compania:co.name, cultivo:cu.name,
       adicionales:Array.from(adicSel), contratacion:Array.from(contratSel),
       filas:JSON.parse(JSON.stringify(filas)),
+      observaciones:observaciones||'',
     });
     setSavedOk(true); setTimeout(()=>setSavedOk(false),2500);
   };
@@ -970,16 +1031,18 @@ function CotizadorApp() {
     setFilas(JSON.parse(JSON.stringify(c.filas)));
     setAdicSel(new Set(c.adicionales||[]));
     setContratSel(new Set(c.contratacion||[]));
+    setObservaciones(c.observaciones||'');
     setCotTab('consulta');
   };
 
-  const generatePDF = (pTitular,pCuit,pCo,pCu,pFilas,pAdicSel,pContratSel) => {
+  const generatePDF = (pTitular,pCuit,pCo,pCu,pFilas,pAdicSel,pContratSel,pObs) => {
     const uT=pTitular!==undefined?pTitular:titular;
     const uCuit=pCuit!==undefined?pCuit:cuit;
     const uCo=pCo||co; const uCu=pCu||cu;
     const uFilas=pFilas||filas;
     const uAdicSel=pAdicSel||adicSel;
     const uContratSel=pContratSel||contratSel;
+    const uObs=pObs!==undefined?pObs:(observaciones||'');
     if(!uCo||!uCu) return;
     let cobStr='G+I+IR+R';
     uAdicSel.forEach(name=>{const ad=(uCu.adicionales||[]).find(a=>a.name===name);if(ad&&ad.abrev)cobStr+='+'+ad.abrev.toUpperCase();});
@@ -1195,6 +1258,12 @@ function CotizadorApp() {
     if(fp.length)pdoc.text(fp.join('   |   '),W/2,283,{align:'center'});
     pdoc.text('Documento generado el '+fecha,W/2,289,{align:'center'});
 
+    if(uObs&&uObs.trim()){
+      secTitle('OBSERVACIONES');
+      pdoc.setFontSize(9.5);pdoc.setFont(undefined,'normal');pdoc.setTextColor(55,68,85);
+      const ol=pdoc.splitTextToSize(uObs.trim(),W-mg*2);
+      pdoc.text(ol,mg,y);y+=ol.length*5.5+4;
+    }
     pdoc.save('Cotizacion_'+uCu.name.replace(/\s+/g,'_')+'.pdf');
   };
 
@@ -1203,7 +1272,7 @@ function CotizadorApp() {
     if(ci===-1){alert('Compañía no encontrada.');return;}
     const vi=cotData[ci].cultivos.findIndex(cu=>cu.name===c.cultivo);
     if(vi===-1){alert('Cultivo no encontrado.');return;}
-    generatePDF(c.titular!=='Sin titular'?c.titular:'',c.cuit!=='—'?c.cuit:'',cotData[ci],cotData[ci].cultivos[vi],c.filas,new Set(c.adicionales||[]),new Set(c.contratacion||[]));
+    generatePDF(c.titular!=='Sin titular'?c.titular:'',c.cuit!=='—'?c.cuit:'',cotData[ci],cotData[ci].cultivos[vi],c.filas,new Set(c.adicionales||[]),new Set(c.contratacion||[]),c.observaciones||'');
   };
 
   const handleImport = (e) => {
@@ -1369,6 +1438,10 @@ function CotizadorApp() {
                     <tbody>{filas.map((f,i)=><tr key={i} style={{background:i%2===0?"white":"#f8fafc"}}><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{cu.name}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{f.ha||'—'}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{f.depto||'—'}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{f.provincia||'—'}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{cob}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{f.tasa||'—'}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{f.franq||'—'}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{f.resiembra?f.resiembra.replace('%','')+'%':'—'}</td></tr>)}</tbody>
                   </table>
                 </div>
+                <div style={card2}>
+                  <div style={cardTitle2}>📝 Observaciones</div>
+                  <textarea value={observaciones} onChange={e=>setObservaciones(e.target.value)} rows={3} placeholder="Observaciones adicionales para incluir al final del PDF..." style={{...inp2,resize:"vertical",width:"100%"}}/>
+                </div>
                 <div style={{display:"flex",gap:10,marginTop:14}}>
                   <button onClick={()=>generatePDF()} style={{flex:1,background:"#1a2e4a",color:"white",border:"none",borderRadius:8,padding:13,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>⬇️ Descargar PDF</button>
                   <button onClick={guardarCotizacion} style={{padding:"13px 20px",background:"#2e7d52",color:"white",border:"none",borderRadius:8,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>💾 Guardar</button>
@@ -1382,7 +1455,10 @@ function CotizadorApp() {
           <div>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
               <div style={{fontSize:17,fontWeight:700,color:"#1a2e4a"}}>Cotizaciones Guardadas</div>
-              <button onClick={async()=>{if(!confirm('¿Eliminar todas?'))return;for(const c of cotizaciones){await deleteDoc(fbDoc(db,'cotizaciones',c.firebaseId));}}} style={{background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:6,padding:"7px 12px",cursor:"pointer",fontSize:12,fontWeight:700}}>🗑️ Limpiar todo</button>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={exportarExcel} style={{background:"#2e7d52",color:"white",border:"none",borderRadius:6,padding:"7px 12px",cursor:"pointer",fontSize:12,fontWeight:700}}>📊 Exportar Excel</button>
+                <button onClick={async()=>{if(!confirm('¿Eliminar todas?'))return;for(const c of cotizaciones){await deleteDoc(fbDoc(db,'cotizaciones',c.firebaseId));}}} style={{background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:6,padding:"7px 12px",cursor:"pointer",fontSize:12,fontWeight:700}}>🗑️ Limpiar todo</button>
+              </div>
             </div>
             {cotizaciones.length===0&&<div style={{textAlign:"center",color:"#94a3b8",padding:24,fontSize:14,background:"white",borderRadius:10,border:"1px solid #e2e8f0"}}>No hay cotizaciones guardadas aún.</div>}
             {cotizaciones.map((c)=>(
