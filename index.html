@@ -109,7 +109,7 @@ function parseVoiceText(text) {
   else if (/baja|sin\s+prisa|cuando\s+pueda/i.test(lower)) result.urgencia = "Baja";
   result.titulo = text.replace(/urgente|urgenta|alta|baja|importante|sin prisa|cuando pueda/gi,"").replace(/\s+/g," ").trim();
   if (/hoy/i.test(lower)) { result.fecha = todayStr(); result.titulo = result.titulo.replace(/hoy/gi,"").trim(); }
-  else if (/manana|mañana/i.test(lower)) { result.fecha = addDays(todayStr(),1); result.titulo = result.titulo.replace(/manana|mañana/gi,"").trim(); }
+  else if (/manana|ma\u00f1ana/i.test(lower)) { result.fecha = addDays(todayStr(),1); result.titulo = result.titulo.replace(/manana|ma\u00f1ana/gi,"").trim(); }
   else if (/lunes/i.test(lower)) { result.fecha = nextWeekday(1); result.titulo = result.titulo.replace(/el\s+lunes|lunes/gi,"").trim(); }
   else if (/martes/i.test(lower)) { result.fecha = nextWeekday(2); result.titulo = result.titulo.replace(/martes/gi,"").trim(); }
   else if (/jueves/i.test(lower)) { result.fecha = nextWeekday(4); result.titulo = result.titulo.replace(/jueves/gi,"").trim(); }
@@ -195,25 +195,24 @@ function ControlMails() {
   const TODAY = new Date(); TODAY.setHours(0,0,0,0);
   function fmtDate(d){
     if(!d) return '';
-    const dt = d.toDate ? d.toDate() : new Date(d);
+    const dt = d.toDate ? d.toDate() : new Date(typeof d === 'number' ? d : d);
     return dt.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'2-digit'})+' '+dt.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
   }
+  function daysAgo(n){ const d=new Date(TODAY); d.setDate(d.getDate()-n); return d; }
 
   const [mails, setMails] = useState([]);
   const [periodo, setPeriodo] = useState('hoy');
   const [filRemitente, setFilRemitente] = useState('');
-  const [filEstado, setFilEstado] = useState('');
   const [busquedaRemitente, setBusquedaRemitente] = useState('');
+  const [filEstado, setFilEstado] = useState('');
   const [sincrState, setSincrState] = useState('idle');
-  const [modalGestionado, setModalGestionado] = useState(null); // {mail} o null
+  const [modalGestionado, setModalGestionado] = useState(null);
   const [dbListo, setDbListo] = useState(false);
 
   useEffect(() => {
     if (!window.__firebaseReady) {
       window.addEventListener('firebaseReady', () => setDbListo(true), {once:true});
-    } else {
-      setDbListo(true);
-    }
+    } else { setDbListo(true); }
   }, []);
 
   useEffect(() => {
@@ -228,29 +227,24 @@ function ControlMails() {
     return () => unsub();
   }, [dbListo]);
 
-  // Estado efectivo de un mail - puede tener ambos o solo uno
-  // Retorna array de estados activos: ['pendiente'] | ['reenviado'] | ['respondido'] | ['reenviado','respondido']
-  const estadosActivos = (m) => {
-    const estados = [];
-    if (m.reenviado)  estados.push('reenviado');
-    if (m.respondido) estados.push('respondido');
-    if (estados.length === 0) estados.push('pendiente');
-    return estados;
+  const puedeGestionar = (m) => {
+    if(m.reenviado || m.respondido || m.gestionado) return false;
+    const hsPasadas = (Date.now() - (m.fechaMs||0)) / (1000*60*60);
+    return hsPasadas >= 24;
   };
 
-  // Para filtros: un mail coincide si alguno de sus estados activos coincide con el filtro
-  const coincideEstado = (m, filtro) => {
-    if (!filtro) return true;
-    if (filtro === 'pendiente')  return !m.reenviado && !m.respondido;
-    if (filtro === 'reenviado')  return !!m.reenviado;
-    if (filtro === 'respondido') return !!m.respondido;
-    if (filtro === 'ambos')      return !!m.reenviado && !!m.respondido;
-    if (filtro === 'gestionado')   return !!m.gestionado;
-    return true;
+  const marcarGestionado = async (mail) => {
+    if(!dbListo) return;
+    const { doc: fbDoc2, updateDoc: updDoc2 } = window.__firebase;
+    const db = window.__db;
+    await updDoc2(fbDoc2(db, 'mails_control', mail.firebaseId), {
+      gestionado: true,
+      fechaGestion: new Date().toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric'})+' '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),
+    });
+    setModalGestionado(null);
   };
 
   const sincronizar = async () => {
-    // Fuerza recarga desde Firebase - los datos reales los escribe Apps Script cada 5 minutos
     setSincrState('loading');
     try {
       const { collection, getDocs } = window.__firebase;
@@ -268,30 +262,20 @@ function ControlMails() {
     }
   };
 
-  function daysAgo(n){ const d=new Date(TODAY); d.setDate(d.getDate()-n); return d; }
-
-  const puedeGestionar = (m) => {
-    // Solo si NO fue reenviado ni respondido
-    if(m.reenviado || m.respondido || m.gestionado) return false;
-    // Solo si pasaron mas de 24hs desde que llego
-    const ahora = Date.now();
-    const fechaMs = m.fechaMs || 0;
-    const hsPasadas = (ahora - fechaMs) / (1000 * 60 * 60);
-    return hsPasadas >= 24;
+  const coincideEstado = (m, filtro) => {
+    if (!filtro) return true;
+    if (filtro === 'pendiente')   return !m.reenviado && !m.respondido && !m.gestionado;
+    if (filtro === 'reenviado')   return !!m.reenviado;
+    if (filtro === 'respondido')  return !!m.respondido;
+    if (filtro === 'ambos')       return !!m.reenviado && !!m.respondido;
+    if (filtro === 'gestionado')  return !!m.gestionado;
+    return true;
   };
 
-  const marcarGestionado = async (mail) => {
-    if(!dbListo) return;
-    const { doc, updateDoc } = window.__firebase;
-    const db = window.__db;
-    const id = mail.firebaseId;
-    await updateDoc(doc(db, 'mails_control', id), {
-      gestionado: true,
-      fechaGestion: new Date().toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric'})+' '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),
-    });
-    setModalGestionado(null);
-  };
-  const cutoffMs   = periodo==='hoy'?TODAY.getTime():periodo==='7d'?daysAgo(7).getTime():periodo==='30d'?daysAgo(30).getTime():0;
+  const nombreCorto = (email) => email ? email.split('@')[0].replace('.',' ').replace(/\b\w/g,l=>l.toUpperCase()) : '—';
+  const remitentes = [...new Set(mails.map(m=>m.remitente))].filter(Boolean).sort();
+
+  const cutoffMs = periodo==='hoy'?TODAY.getTime():periodo==='7d'?daysAgo(7).getTime():periodo==='30d'?daysAgo(30).getTime():0;
 
   const filtered = mails.filter(m => {
     if((m.fechaMs||0) < cutoffMs) return false;
@@ -300,44 +284,12 @@ function ControlMails() {
     return true;
   });
 
-  const total      = filtered.length;
-  const pendientes = filtered.filter(m => !m.reenviado && !m.respondido).length;
-  const respondidos= filtered.filter(m => m.respondido).length;
-  const reenviados = filtered.filter(m => m.reenviado).length;
-  const ambos      = filtered.filter(m => m.reenviado && m.respondido).length;
+  const total       = filtered.length;
+  const pendientes  = filtered.filter(m => !m.reenviado && !m.respondido && !m.gestionado).length;
+  const respondidos = filtered.filter(m => m.respondido).length;
+  const reenviados  = filtered.filter(m => m.reenviado).length;
+  const ambos       = filtered.filter(m => m.reenviado && m.respondido).length;
   const gestionados = filtered.filter(m => m.gestionado).length;
-
-  const nombreCorto = (email) => email ? email.split('@')[0].replace('.',' ').replace(/\b\w/g,l=>l.toUpperCase()) : '—';
-
-  // Remitentes filtrados por búsqueda
-  const remitentes = [...new Set(mails.map(m=>m.remitente))].filter(Boolean).sort();
-  const remitentesFiltrados = busquedaRemitente.trim()
-    ? remitentes.filter(r => r.toLowerCase().includes(busquedaRemitente.toLowerCase()) || nombreCorto(r).toLowerCase().includes(busquedaRemitente.toLowerCase()))
-    : remitentes;
-
-  // Limpiar datos demo de Firebase (emails que no son reales)
-  const limpiarDemoDB = async () => {
-    const { collection, getDocs, deleteDoc, doc } = window.__firebase;
-    const db = window.__db;
-    const snap = await getDocs(collection(db, 'mails_control'));
-    const demoIds = snap.docs
-      .filter(d => {
-        const data = d.data();
-        const rem = data.remitente || '';
-        // Identificar datos demo por remitentes conocidos de ejemplo
-        return rem.includes('juan.garcia@agro') || rem.includes('maria.lopez@campo') ||
-               rem.includes('pedro.romero@broker') || rem.includes('laura.diaz@agro') ||
-               rem.includes('carlos.mendez@gmail') || rem.includes('ana.fernandez@campo') ||
-               rem.includes('roberto.silva@agro') || rem.includes('google.com') ||
-               rem.includes('firebase') || rem.includes('noreply') ||
-               (data.gmailId && data.gmailId.startsWith('d'));
-      })
-      .map(d => d.id);
-    for (const id of demoIds) {
-      await deleteDoc(doc(db, 'mails_control', id));
-    }
-    Logger && Logger.log && Logger.log('Demo eliminados: ' + demoIds.length);
-  };
 
   const selStyle = {fontFamily:GEO,fontSize:12,padding:"5px 10px",height:30,borderRadius:6,border:"1px solid #e2e8f0",background:"#f8fafc",color:"#1e293b",cursor:"pointer",letterSpacing:"0.03em"};
   const periodBtnStyle = (p) => ({fontFamily:GEO,fontSize:12,letterSpacing:"0.06em",textTransform:"uppercase",padding:"4px 12px",borderRadius:6,border:periodo===p?"1px solid #003264":"1px solid #e2e8f0",background:periodo===p?"#003264":"transparent",color:periodo===p?"#fff":"#64748b",cursor:"pointer"});
@@ -346,11 +298,9 @@ function ControlMails() {
   const tdStyle = {padding:"9px 12px",color:"#1a2e4a",verticalAlign:"middle",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:13,fontFamily:GEO};
   const rowBg   = (i) => i%2===0 ? "#ffffff" : "#f8fafc";
 
-  // Badges individuales por tipo de estado
   const BadgeReenviado  = () => <span style={{display:"inline-block",fontSize:10,letterSpacing:"0.06em",textTransform:"uppercase",fontFamily:GEO,padding:"2px 8px",borderRadius:99,background:"rgba(26,75,140,0.12)",color:"#1a4b8c",border:"1px solid rgba(26,75,140,0.25)",marginRight:3}}>Reenviado</span>;
   const BadgeRespondido = () => <span style={{display:"inline-block",fontSize:10,letterSpacing:"0.06em",textTransform:"uppercase",fontFamily:GEO,padding:"2px 8px",borderRadius:99,background:"rgba(39,174,96,0.15)",color:"#1a6b3a",border:"1px solid rgba(39,174,96,0.3)",marginRight:3}}>Respondido</span>;
   const BadgePendiente  = () => <span style={{display:"inline-block",fontSize:10,letterSpacing:"0.06em",textTransform:"uppercase",fontFamily:GEO,padding:"2px 8px",borderRadius:99,background:"rgba(255,107,107,0.18)",color:"#c0392b",border:"1px solid rgba(255,107,107,0.3)"}}>Pendiente</span>;
-
   const BadgeGestionado = () => <span style={{display:"inline-block",fontSize:10,letterSpacing:"0.06em",textTransform:"uppercase",fontFamily:GEO,padding:"2px 8px",borderRadius:99,background:"rgba(107,70,193,0.12)",color:"#6b46c1",border:"1px solid rgba(107,70,193,0.25)"}}>Gestionado</span>;
 
   const EstadoBadges = ({m}) => {
@@ -367,7 +317,6 @@ function ControlMails() {
   return (
     <div style={{background:"white",borderRadius:10,padding:20,fontFamily:GEO,color:"#1e293b",border:"1px solid #e2e8f0",minHeight:500}}>
 
-      {/* Header */}
       <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:20,borderBottom:"1px solid #e2e8f0",paddingBottom:16}}>
         <div style={{width:38,height:38,background:"#003264",borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
           <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
@@ -391,35 +340,19 @@ function ControlMails() {
           <div style={{fontSize:12,color:"#64748b",letterSpacing:"0.06em",textTransform:"uppercase",fontFamily:GEO}}>Control de Mails</div>
         </div>
         <button onClick={sincronizar} disabled={sincrState==='loading'} style={{fontFamily:GEO,fontSize:12,letterSpacing:"0.08em",textTransform:"uppercase",padding:"7px 16px",borderRadius:7,border:"1px solid #e2e8f0",background:sincrState==='ok'?"#dcfce7":sincrState==='error'?"#fee2e2":"#003264",color:sincrState==='ok'?"#166534":sincrState==='error'?"#991b1b":"#fff",cursor:sincrState==='loading'?"not-allowed":"pointer",flexShrink:0}}>
-          {sincrState==='loading'?'Sincronizando...':sincrState==='ok'?'✓ Sincronizado':sincrState==='error'?'Error':'Sincronizar'}
+          {sincrState==='loading'?'Sincronizando...':sincrState==='ok'?'Sincronizado':sincrState==='error'?'Error':'Sincronizar'}
         </button>
       </div>
 
-      {/* Métricas — ahora incluye "Ambos" */}
       <div style={{display:"flex",gap:10,marginBottom:18,flexWrap:"wrap"}}>
-        <div style={metricStyle}>
-          <div style={{fontSize:11,letterSpacing:"0.08em",textTransform:"uppercase",color:"#94a3b8",marginBottom:4}}>Recibidos</div>
-          <div style={{fontSize:26,fontWeight:400,color:"#0f172a"}}>{total}</div>
-        </div>
-        <div style={metricStyle}>
-          <div style={{fontSize:11,letterSpacing:"0.08em",textTransform:"uppercase",color:"#94a3b8",marginBottom:4}}>Pendientes</div>
-          <div style={{fontSize:26,fontWeight:400,color:pendientes>0?"#FF6B6B":"#fff"}}>{pendientes}</div>
-        </div>
-        <div style={metricStyle}>
-          <div style={{fontSize:11,letterSpacing:"0.08em",textTransform:"uppercase",color:"#94a3b8",marginBottom:4}}>Reenviados</div>
-          <div style={{fontSize:26,fontWeight:400,color:"#7EB8F7"}}>{reenviados}</div>
-        </div>
-        <div style={metricStyle}>
-          <div style={{fontSize:11,letterSpacing:"0.08em",textTransform:"uppercase",color:"#94a3b8",marginBottom:4}}>Respondidos</div>
-          <div style={{fontSize:26,fontWeight:400,color:"#4ECFA8"}}>{respondidos}</div>
-        </div>
-        <div style={metricStyle}>
-          <div style={{fontSize:11,letterSpacing:"0.08em",textTransform:"uppercase",color:"#94a3b8",marginBottom:4}}>Ambos</div>
-          <div style={{fontSize:26,fontWeight:400,color:"#FFD060"}}>{ambos}</div>
-        </div>
+        {[{l:"Recibidos",v:total,c:"#0f172a"},{l:"Pendientes",v:pendientes,c:pendientes>0?"#FF6B6B":"#0f172a"},{l:"Reenviados",v:reenviados,c:"#7EB8F7"},{l:"Respondidos",v:respondidos,c:"#4ECFA8"},{l:"Ambos",v:ambos,c:"#FFD060"},{l:"Gestionados",v:gestionados,c:"#a78bfa"}].map(({l,v,c})=>(
+          <div key={l} style={metricStyle}>
+            <div style={{fontSize:11,letterSpacing:"0.08em",textTransform:"uppercase",color:"#94a3b8",marginBottom:4}}>{l}</div>
+            <div style={{fontSize:26,fontWeight:400,color:c}}>{v}</div>
+          </div>
+        ))}
       </div>
 
-      {/* Filtros */}
       <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:14,alignItems:"flex-end"}}>
         <div>
           <div style={{fontSize:10,letterSpacing:"0.08em",textTransform:"uppercase",color:"#94a3b8",marginBottom:5}}>Período</div>
@@ -434,25 +367,11 @@ function ControlMails() {
         <div>
           <div style={{fontSize:10,letterSpacing:"0.08em",textTransform:"uppercase",color:"#94a3b8",marginBottom:5}}>Remitente</div>
           <div style={{position:"relative"}}>
-            <input
-              list="lista-remitentes"
-              value={busquedaRemitente}
-              onChange={e=>{
-                setBusquedaRemitente(e.target.value);
-                const match = remitentes.find(r=>r===e.target.value||nombreCorto(r)===e.target.value);
-                setFilRemitente(match||'');
-              }}
-              placeholder="Buscar o elegir remitente..."
-              style={{...selStyle,width:200,height:30}}
-            />
-            {busquedaRemitente && (
-              <button onClick={()=>{setBusquedaRemitente(''); setFilRemitente('');}} style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"#94a3b8",fontSize:14,lineHeight:1}}>×</button>
-            )}
-            <datalist id="lista-remitentes">
-              {remitentes.map(r=>(
-                <option key={r} value={r}>{nombreCorto(r)}</option>
-              ))}
-            </datalist>
+            <input list="lista-remitentes" value={busquedaRemitente}
+              onChange={e=>{setBusquedaRemitente(e.target.value);const match=remitentes.find(r=>r===e.target.value);setFilRemitente(match||'');}}
+              placeholder="Buscar o elegir..." style={{...selStyle,width:200,height:30}}/>
+            {busquedaRemitente&&<button onClick={()=>{setBusquedaRemitente('');setFilRemitente('');}} style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"#94a3b8",fontSize:14}}>x</button>}
+            <datalist id="lista-remitentes">{remitentes.map(r=><option key={r} value={r}>{nombreCorto(r)}</option>)}</datalist>
           </div>
         </div>
         <div>
@@ -468,7 +387,6 @@ function ControlMails() {
         </div>
       </div>
 
-      {/* Tabla */}
       <div style={{borderRadius:8,border:"1px solid #e2e8f0",overflow:"hidden"}}>
         <div style={{overflowX:"auto"}}>
           <table style={{width:"100%",borderCollapse:"collapse",minWidth:750}}>
@@ -480,11 +398,12 @@ function ControlMails() {
                 <th style={{...thStyle,width:160}}>Estado</th>
                 <th style={{...thStyle,width:150}}>Reenviado a</th>
                 <th style={{...thStyle,width:195}}>Gestión</th>
+                <th style={{...thStyle,width:90}}>Acción</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length===0 && (
-                <tr><td colSpan="7" style={{...tdStyle,textAlign:"center",padding:"2.5rem",color:"#94a3b8",letterSpacing:"0.05em",background:"#f8fafc"}}>
+                <tr><td colSpan="7" style={{...tdStyle,textAlign:"center",padding:"2.5rem",color:"#94a3b8",background:"#f8fafc"}}>
                   {mails.length===0 ? "Presioná Sincronizar para cargar los mails." : "Sin mails para los filtros seleccionados."}
                 </td></tr>
               )}
@@ -493,54 +412,42 @@ function ControlMails() {
                   <td style={{...tdStyle,color:"#2c4a6e",fontSize:11}}>{fmtDate(m.fechaMs)}</td>
                   <td style={{...tdStyle,color:"#1a2e4a",fontWeight:500}} title={m.remitente}>{nombreCorto(m.remitente)}</td>
                   <td style={{...tdStyle,color:"#243d5c"}} title={m.asunto}>{m.asunto}</td>
-                  <td style={{...tdStyle,padding:"6px 12px"}}>
-                    <EstadoBadges m={m}/>
-                  </td>
+                  <td style={{...tdStyle,padding:"6px 12px"}}><EstadoBadges m={m}/></td>
                   <td style={tdStyle}>
                     {m.destinoReenvio
-                      ? <span style={{display:"inline-block",fontSize:11,fontFamily:GEO,padding:"2px 8px",borderRadius:99,maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",verticalAlign:"middle",background:"rgba(26,75,140,0.1)",color:"#1a4b8c",border:"1px solid rgba(26,75,140,0.2)"}} title={m.destinoReenvio}>{m.destinoReenvio}</span>
-                      : <span style={{color:"#8aaacc",fontSize:12}}>—</span>
+                      ? <span style={{display:"inline-block",fontSize:11,fontFamily:GEO,padding:"2px 8px",borderRadius:99,maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",background:"rgba(26,75,140,0.1)",color:"#1a4b8c",border:"1px solid rgba(26,75,140,0.2)"}} title={m.destinoReenvio}>{m.destinoReenvio}</span>
+                      : <span style={{color:"#8aaacc",fontSize:12}}>-</span>
                     }
                   </td>
-                  {/* Columna Gestión: muestra quién reenvió y quién respondió */}
-                  <td style={{...tdStyle,padding:"5px 8px"}}>
-                    {puedeGestionar(m) && (
-                      <button
-                        onClick={()=>setModalGestionado(m)}
-                        style={{fontFamily:GEO,fontSize:10,letterSpacing:"0.05em",textTransform:"uppercase",padding:"3px 8px",borderRadius:5,border:"1px solid rgba(107,70,193,0.3)",background:"rgba(107,70,193,0.08)",color:"#6b46c1",cursor:"pointer",whiteSpace:"nowrap"}}
-                      >
-                        Gestionar
-                      </button>
-                    )}
-                  </td>
                   <td style={{...tdStyle,padding:"5px 12px"}}>
-                    <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                    <div style={{display:"flex",flexDirection:"column",gap:2}}>
                       {m.gestorReenvio && (
                         <div style={{fontSize:11,color:"#1a4b8c",fontFamily:GEO,lineHeight:1.5}}>
-                          <span style={{color:"#8aaacc",fontSize:10,marginRight:4}}>Reenvió:</span>
+                          <span style={{color:"#8aaacc",fontSize:10,marginRight:4}}>Reenvio:</span>
                           <strong>{m.gestorReenvio}</strong>
-                          {(m.fechaReenvio||m.horaReenvio) && (
-                            <span style={{color:"#8aaacc",marginLeft:4,fontSize:10,display:"block",paddingLeft:48}}>
-                              {m.fechaReenvio||m.horaReenvio}
-                            </span>
-                          )}
+                          {(m.fechaReenvio||m.horaReenvio) && <span style={{color:"#8aaacc",marginLeft:4,fontSize:10,display:"block",paddingLeft:48}}>{m.fechaReenvio||m.horaReenvio}</span>}
                         </div>
                       )}
                       {m.gestorRespuesta && (
                         <div style={{fontSize:11,color:"#1a6b3a",fontFamily:GEO,lineHeight:1.5}}>
-                          <span style={{color:"#8aaacc",fontSize:10,marginRight:4}}>Respondió:</span>
+                          <span style={{color:"#8aaacc",fontSize:10,marginRight:4}}>Respuesta:</span>
                           <strong>{m.gestorRespuesta}</strong>
-                          {(m.fechaRespuesta||m.horaRespuesta) && (
-                            <span style={{color:"#8aaacc",marginLeft:4,fontSize:10,display:"block",paddingLeft:60}}>
-                              {m.fechaRespuesta||m.horaRespuesta}
-                            </span>
-                          )}
+                          {(m.fechaRespuesta||m.horaRespuesta) && <span style={{color:"#8aaacc",marginLeft:4,fontSize:10,display:"block",paddingLeft:60}}>{m.fechaRespuesta||m.horaRespuesta}</span>}
                         </div>
                       )}
-                      {!m.gestorReenvio && !m.gestorRespuesta && (
-                        <span style={{color:"#8aaacc",fontSize:12}}>—</span>
+                      {m.gestionado && m.fechaGestion && (
+                        <div style={{fontSize:11,color:"#6b46c1",fontFamily:GEO}}>
+                          <span style={{color:"#8aaacc",fontSize:10,marginRight:4}}>Gestionado:</span>
+                          <span>{m.fechaGestion}</span>
+                        </div>
                       )}
+                      {!m.gestorReenvio && !m.gestorRespuesta && !m.gestionado && <span style={{color:"#8aaacc",fontSize:12}}>-</span>}
                     </div>
+                  </td>
+                  <td style={{...tdStyle,padding:"5px 8px"}}>
+                    {puedeGestionar(m) && (
+                      <button onClick={()=>setModalGestionado(m)} style={{fontFamily:GEO,fontSize:10,letterSpacing:"0.05em",textTransform:"uppercase",padding:"3px 8px",borderRadius:5,border:"1px solid rgba(107,70,193,0.3)",background:"rgba(107,70,193,0.08)",color:"#6b46c1",cursor:"pointer",whiteSpace:"nowrap"}}>Gestionar</button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -549,48 +456,37 @@ function ControlMails() {
         </div>
       </div>
 
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10}}>
+        <span style={{fontSize:12,color:"#94a3b8",letterSpacing:"0.04em"}}>
+          {filtered.length > 0 ? `${filtered.length} mail${filtered.length!==1?'s':''} encontrados` : ''}
+        </span>
+        <span style={{fontSize:11,color:"#cbd5e1",letterSpacing:"0.03em"}}>agro@allariabroker.com.ar · Apps Script sync</span>
+      </div>
 
-      {/* Modal confirmación Gestionado */}
       {modalGestionado && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
           <div style={{background:"white",borderRadius:12,padding:24,maxWidth:420,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,0.3)"}}>
             <div style={{fontSize:13,fontWeight:700,color:"#0f172a",marginBottom:8,fontFamily:GEO}}>Marcar como Gestionado</div>
-            <div style={{fontSize:12,color:"#64748b",marginBottom:14,lineHeight:1.6}}>
-              ¿Confirmar cierre manual del mail?
-            </div>
-            <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"10px 14px",marginBottom:18}}>
-              <div style={{fontSize:11,color:"#94a3b8",marginBottom:2,fontFamily:GEO,textTransform:"uppercase",letterSpacing:"0.06em"}}>Asunto</div>
+            <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"10px 14px",marginBottom:14}}>
+              <div style={{fontSize:11,color:"#94a3b8",marginBottom:2,textTransform:"uppercase",letterSpacing:"0.06em"}}>Asunto</div>
               <div style={{fontSize:13,color:"#1e293b",fontWeight:500}}>{modalGestionado.asunto}</div>
               <div style={{fontSize:11,color:"#94a3b8",marginTop:4}}>De: {modalGestionado.remitente}</div>
             </div>
             <div style={{background:"#fef3c7",border:"1px solid #f59e0b",borderRadius:7,padding:"8px 12px",marginBottom:16,fontSize:12,color:"#92400e"}}>
-              Esta acción no se puede deshacer. Solo disponible pasadas 24hs de recibido el mail.
+              Solo disponible pasadas 24hs. Esta accion no se puede deshacer.
             </div>
             <div style={{display:"flex",gap:10}}>
-              <button onClick={()=>setModalGestionado(null)} style={{flex:1,padding:"9px",borderRadius:7,border:"1px solid #e2e8f0",background:"white",cursor:"pointer",fontSize:13,color:"#64748b",fontFamily:GEO}}>Cancelar</button>
-              <button onClick={()=>marcarGestionado(modalGestionado)} style={{flex:1,padding:"9px",borderRadius:7,border:"none",background:"#6b46c1",color:"white",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:GEO}}>Confirmar</button>
+              <button onClick={()=>setModalGestionado(null)} style={{flex:1,padding:"9px",borderRadius:7,border:"1px solid #e2e8f0",background:"white",cursor:"pointer",fontSize:13,color:"#64748b"}}>Cancelar</button>
+              <button onClick={()=>marcarGestionado(modalGestionado)} style={{flex:1,padding:"9px",borderRadius:7,border:"none",background:"#6b46c1",color:"white",cursor:"pointer",fontSize:13,fontWeight:700}}>Confirmar</button>
             </div>
           </div>
         </div>
       )}
 
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10}}>
-        <span style={{fontSize:12,color:"#94a3b8",letterSpacing:"0.04em"}}>
-          {filtered.length > 0 ? `${filtered.length} mail${filtered.length!==1?'s':''} encontrados` : ''}
-        </span>
-        <div style={{display:"flex",gap:8,alignItems:"center"}}>
-          <span style={{fontSize:11,color:"#cbd5e1",letterSpacing:"0.03em"}}>
-            agro@allariabroker.com.ar · Apps Script sync
-          </span>
-
-        </div>
-      </div>
-
     </div>
   );
 }
 // ===================== FIN CONTROL DE MAILS =====================
-
 
 
 function LoginScreen({onLogin}) {
@@ -600,7 +496,7 @@ function LoginScreen({onLogin}) {
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const handleLogin = async () => {
-    if (!usuario.trim() || !password.trim()) { setError("Completá usuario y contraseña."); return; }
+    if (!usuario.trim() || !password.trim()) { setError("Complet\u00e1 usuario y contrase\u00f1a."); return; }
     setLoading(true); setError("");
     const { signInWithEmailAndPassword } = window.__firebase;
     const auth = window.__auth;
@@ -609,7 +505,7 @@ function LoginScreen({onLogin}) {
       localStorage.setItem("trilla_session", usuario.trim());
       onLogin(usuario.trim());
     } catch(e) {
-      setError("Usuario o contraseña incorrectos.");
+      setError("Usuario o contrase\u00f1a incorrectos.");
     }
     setLoading(false);
   };
@@ -636,7 +532,7 @@ function LoginScreen({onLogin}) {
         </div>
         {error && <div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#dc2626",marginBottom:14,textAlign:"center"}}>{error}</div>}
         <button onClick={handleLogin} disabled={loading} style={{width:"100%",padding:"11px",borderRadius:8,border:"none",background:loading?"#94a3b8":"#003264",color:"white",fontSize:15,fontWeight:700,cursor:loading?"not-allowed":"pointer",fontFamily:GEO,letterSpacing:2}}>{loading?"Ingresando...":"INGRESAR"}</button>
-        <div style={{marginTop:20,textAlign:"center",fontSize:11,color:"#94a3b8"}}>Trilla — Agenda Profesional</div>
+        <div style={{marginTop:20,textAlign:"center",fontSize:11,color:"#94a3b8"}}>Trilla \u2014 Agenda Profesional</div>
       </div>
     </div>
   );
@@ -662,7 +558,7 @@ function DailyBanner({tasks, today, visible, onClose}) {
     <div style={{overflow:"hidden",maxHeight:visible?"180px":"0px",opacity:visible?1:0,transition:"max-height 0.45s cubic-bezier(0.4,0,0.2,1), opacity 0.3s ease"}}>
       <div style={{background:"#003264",padding:"12px 16px",display:"flex",alignItems:"flex-start",gap:14,borderBottom:"1px solid #00285a"}}>
         <div style={{flex:1}}>
-          <div style={{fontSize:13,fontWeight:700,color:"#f1f5f9",marginBottom:5,fontFamily:GEO}}>Buen dia chicos, como estan? 👋</div>
+          <div style={{fontSize:13,fontWeight:700,color:"#f1f5f9",marginBottom:5,fontFamily:GEO}}>Buen dia chicos, como estan? \ud83d\udc4b</div>
           <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
             {tareasHoy.length === 0
               ? <span style={{fontSize:12,color:"#93c5fd"}}>No tienen tareas pendientes para hoy.</span>
@@ -726,7 +622,7 @@ function TaskDetailPanel({task, expandedTab, setExpandedTab, toggleSubtask, dele
                   <span style={{fontSize:11,fontWeight:700,color:"#1e293b"}}>{c.usuario}</span>
                   <div style={{display:"flex",gap:6,alignItems:"center"}}>
                     <span style={{fontSize:10,color:"#94a3b8"}}>{c.fecha}</span>
-                    {c.usuario === currentUser.nombre && <button onClick={() => deleteComment(task.firebaseId,c.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#cbd5e1",fontSize:11}}>x</button>}
+                    {c.usuario === (currentUser?.nombre||"") && <button onClick={() => deleteComment(task.firebaseId,c.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#cbd5e1",fontSize:11}}>x</button>}
                   </div>
                 </div>
                 <div style={{fontSize:12,color:"#334155"}}>{c.text}</div>
@@ -734,9 +630,9 @@ function TaskDetailPanel({task, expandedTab, setExpandedTab, toggleSubtask, dele
             </div>
           ))}
           <div style={{display:"flex",gap:8,marginTop:4}}>
-            <Avatar nombre={currentUser.nombre} size={26}/>
+            <Avatar nombre={currentUser?.nombre||"Sin usuario"} size={26}/>
             <div style={{flex:1,display:"flex",gap:6}}>
-              <input value={localComment} onChange={e => setLocalComment(e.target.value)} onKeyDown={e => { if(e.key==="Enter"){ addComment(task.firebaseId,localComment); setLocalComment(""); }}} placeholder={"Comentar como "+currentUser.nombre+"..."} style={{...inp,flex:1,fontSize:12}}/>
+              <input value={localComment} onChange={e => setLocalComment(e.target.value)} onKeyDown={e => { if(e.key==="Enter"){ addComment(task.firebaseId,localComment); setLocalComment(""); }}} placeholder={"Comentar como "+(currentUser?.nombre||"Usuario")+"..."} style={{...inp,flex:1,fontSize:12}}/>
               <button onClick={() => { addComment(task.firebaseId,localComment); setLocalComment(""); }} style={{padding:"6px 12px",borderRadius:6,border:"none",background:"#003264",color:"white",cursor:"pointer",fontSize:12,fontWeight:600}}>OK</button>
             </div>
           </div>
@@ -780,11 +676,11 @@ function TaskDetailPanel({task, expandedTab, setExpandedTab, toggleSubtask, dele
 
 // ===================== COTIZADOR =====================
 const CATS_COT=[
-  {key:'adicionales',label:'Adicionales',icon:'⚡',cls:'a',hasAbrev:true},
-  {key:'franqs',label:'Franq/Ded',icon:'📋',cls:'f',hasAbrev:false},
-  {key:'tipos',label:'Tipo Contrat.',icon:'📝',cls:'t',hasAbrev:false},
+  {key:'adicionales',label:'Adicionales',icon:'\u26a1',cls:'a',hasAbrev:true},
+  {key:'franqs',label:'Franq/Ded',icon:'\ud83d\udccb',cls:'f',hasAbrev:false},
+  {key:'tipos',label:'Tipo Contrat.',icon:'\ud83d\udcdd',cls:'t',hasAbrev:false},
 ];
-const PROVINCIAS_COT=['BUENOS AIRES','SANTA FE','CÓRDOBA','LA PAMPA','ENTRE RÍOS','SAN LUIS','SGO. DEL ESTERO'];
+const PROVINCIAS_COT=['BUENOS AIRES','SANTA FE','C\u00d3RDOBA','LA PAMPA','ENTRE R\u00cdOS','SAN LUIS','SGO. DEL ESTERO'];
 
 function CotizadorApp() {
   const [cotTab, setCotTab] = useState('consulta');
@@ -907,7 +803,7 @@ function CotizadorApp() {
     await persistDB(d, franqsGlobal); setModal(null);
   };
   const deleteCompany = async (ci) => {
-    if(!confirm('¿Eliminar?')) return;
+    if(!confirm('\u00bfEliminar?')) return;
     await persistDB(cotData.filter((_,i)=>i!==ci), franqsGlobal);
   };
   const saveCultivo = async () => {
@@ -919,7 +815,7 @@ function CotizadorApp() {
     await persistDB(d, franqsGlobal); setModal(null);
   };
   const deleteCultivo = async (ci,vi) => {
-    if(!confirm('¿Eliminar?')) return;
+    if(!confirm('\u00bfEliminar?')) return;
     let d=JSON.parse(JSON.stringify(cotData)); d[ci].cultivos.splice(vi,1);
     await persistDB(d, franqsGlobal);
   };
@@ -936,76 +832,32 @@ function CotizadorApp() {
     await persistDB(d, franqsGlobal); setModal(null);
   };
   const deleteItem = async (ci,vi,catKey,ai) => {
-    if(!confirm('¿Eliminar?')) return;
+    if(!confirm('\u00bfEliminar?')) return;
     let d=JSON.parse(JSON.stringify(cotData)); d[ci].cultivos[vi][catKey].splice(ai,1);
     await persistDB(d, franqsGlobal);
   };
 
   const exportarExcel = () => {
-    if(cotizaciones.length===0){alert('No hay cotizaciones para exportar.');return;}
-
-    // Ordenar por fecha de carga (timestamp)
+    if(cotizaciones.length===0){alert('No hay cotizaciones.');return;}
     const sorted=[...cotizaciones].sort((a,b)=>(a.timestamp||0)-(b.timestamp||0));
-
-    // Encabezados
-    const headers=[
-      'ID','Titular','CUIT','Compañía','Cultivo',
-      'Depto/Partido','Provincia','Ha',
-      'Adicionales','Tipo Contratación','Observaciones'
-    ];
-
-    // Filas — una por cada combinación fila/cotización
-    const rows=[];
-    let idCounter=1;
-    sorted.forEach(c=>{
-      const filas=c.filas&&c.filas.length>0?c.filas:[{depto:'',provincia:'',ha:''}];
-      const adicIniciales=(c.adicionales||[]).join(', ');
-      const contratTitulo=(c.contratacion||[]).map(k=>k.charAt(0).toUpperCase()+k.slice(1)).join(', ');
-      filas.forEach(f=>{
-        rows.push([
-          idCounter,
-          c.titular||'',
-          c.cuit||'',
-          c.compania||'',
-          c.cultivo||'',
-          f.depto||'',
-          f.provincia||'',
-          f.ha||'',
-          adicIniciales,
-          contratTitulo,
-          c.observaciones||''
-        ]);
-      });
-      idCounter++;
-    });
-
-    // Generar Excel usando SheetJS
+    const headers=['ID','Titular','CUIT','Compania','Cultivo','Depto','Provincia','Ha','Adicionales','Contratacion','Observaciones'];
+    const rows=[];let id=1;
+    sorted.forEach(c=>{const fs=c.filas&&c.filas.length>0?c.filas:[{depto:'',provincia:'',ha:''}];const ad=(c.adicionales||[]).join(', ');const ct=(c.contratacion||[]).map(k=>k.charAt(0).toUpperCase()+k.slice(1)).join(', ');fs.forEach(f=>{rows.push([id,c.titular||'',c.cuit||'',c.compania||'',c.cultivo||'',f.depto||'',f.provincia||'',f.ha||'',ad,ct,c.observaciones||'']);});id++;});
     const XLSX=window.XLSX;
-    if(!XLSX){alert('Error: librería XLSX no disponible.');return;}
-
-    const wsData=[headers,...rows];
-    const ws=XLSX.utils.aoa_to_sheet(wsData);
-
-    // Ancho de columnas
-    ws['!cols']=[
-      {wch:6},{wch:25},{wch:16},{wch:20},{wch:15},
-      {wch:18},{wch:15},{wch:8},
-      {wch:20},{wch:20},{wch:30}
-    ];
-
-    const wb=XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb,ws,'Cotizaciones');
-
-    const fecha=new Date().toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric'}).replace(/\//g,'-');
-    XLSX.writeFile(wb,'Cotizaciones_Trilla_'+fecha+'.xlsx');
+    if(!XLSX){alert('Error XLSX');return;}
+    const ws=XLSX.utils.aoa_to_sheet([headers,...rows]);
+    ws['!cols']=[{wch:6},{wch:25},{wch:16},{wch:20},{wch:15},{wch:18},{wch:15},{wch:8},{wch:20},{wch:20},{wch:30}];
+    const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Cotizaciones');
+    const d=new Date();const fn='Cotizaciones_Trilla_'+d.getDate()+'-'+(d.getMonth()+1)+'-'+d.getFullYear()+'.xlsx';
+    XLSX.writeFile(wb,fn);
   };
 
-  const guardarCotizacion = async () => {
-    if(!co||!cu){alert('Seleccioná compañía y cultivo primero.');return;}
+    const guardarCotizacion = async () => {
+    if(!co||!cu){alert('Seleccion\u00e1 compa\u00f1\u00eda y cultivo primero.');return;}
     await addDoc(collection(db,'cotizaciones'),{
       timestamp:Date.now(),
       fecha:new Date().toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric'}),
-      titular:titular||'Sin titular', cuit:cuit||'—',
+      titular:titular||'Sin titular', cuit:cuit||'\u2014',
       compania:co.name, cultivo:cu.name,
       adicionales:Array.from(adicSel), contratacion:Array.from(contratSel),
       filas:JSON.parse(JSON.stringify(filas)),
@@ -1015,15 +867,15 @@ function CotizadorApp() {
   };
 
   const eliminarCotizacion = async (firebaseId) => {
-    if(!confirm('¿Eliminar esta cotización?')) return;
+    if(!confirm('\u00bfEliminar esta cotizaci\u00f3n?')) return;
     await deleteDoc(fbDoc(db,'cotizaciones',firebaseId));
   };
 
   const editarCotizacion = (c) => {
     setTitular(c.titular!=='Sin titular'?c.titular:'');
-    setCuit(c.cuit!=='—'?c.cuit:'');
+    setCuit(c.cuit!=='\u2014'?c.cuit:'');
     const ci=cotData.findIndex(co=>co.name===c.compania);
-    if(ci===-1){alert('Compañía no encontrada.');return;}
+    if(ci===-1){alert('Compa\u00f1\u00eda no encontrada.');return;}
     setSelCompany(ci);
     const vi=cotData[ci].cultivos.findIndex(cu=>cu.name===c.cultivo);
     if(vi===-1){alert('Cultivo no encontrado.');return;}
@@ -1044,100 +896,49 @@ function CotizadorApp() {
     const uContratSel=pContratSel||contratSel;
     const uObs=pObs!==undefined?pObs:(observaciones||'');
     if(!uCo||!uCu) return;
-    let cobStr='G+I+IR+R';
-    uAdicSel.forEach(name=>{const ad=(uCu.adicionales||[]).find(a=>a.name===name);if(ad&&ad.abrev)cobStr+='+'+ad.abrev.toUpperCase();});
-    const adicItems=Array.from(uAdicSel).map(name=>(uCu.adicionales||[]).find(a=>a.name===name)).filter(Boolean);
-    const ct=uCo.contratacion||{};
-    const carencia=(uCo.carencia||[])[0]||null;
-    const franqsUsadas=[];
-    uFilas.forEach(f=>{if(f.franq&&!franqsUsadas.includes(f.franq))franqsUsadas.push(f.franq);});
+
     const jsPDF=window.jspdf.jsPDF;
     const pdoc=new jsPDF({unit:'mm',format:'a4'});
     const W=210,mg=18;
     const fecha=new Date().toLocaleDateString('es-AR',{day:'2-digit',month:'long',year:'numeric'});
     const ciudad=cotConfig.ciudad||'';
+    const cotConfig2=cotConfig||{};
+
+    // Header azul
     pdoc.setFillColor(0,45,90);pdoc.rect(0,0,W,30,'F');
-    const logoToUse=logoDataURL||'data:image/jpeg;base64,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';try{pdoc.addImage(logoToUse,'JPEG',mg,3,55,24);}catch(e){console.warn('Logo error:',e);}
-    pdoc.setFontSize(10);pdoc.setFont(undefined,'normal');pdoc.setTextColor(255,255,255);
-    pdoc.text(ciudad?ciudad+', '+fecha:fecha,W-mg,16,{align:'right'});
-    pdoc.setFillColor(0,102,180);pdoc.rect(mg,32,W-mg*2,8,'F');
-    pdoc.setTextColor(255,255,255);pdoc.setFontSize(9.5);pdoc.setFont(undefined,'bold');
-    pdoc.text('COTIZACIÓN — '+uCu.name.toUpperCase(),W/2,37.5,{align:'center'});
-    pdoc.setFillColor(245,247,250);pdoc.rect(mg,42,W-mg*2,13,'F');
-    pdoc.setDrawColor(220,226,235);pdoc.setLineWidth(0.3);pdoc.rect(mg,42,W-mg*2,13,'S');
-    pdoc.setFillColor(26,46,74);pdoc.rect(mg,42,2,13,'F');
-    const third=(W-mg*2)/3;
-    pdoc.setDrawColor(210,218,228);pdoc.setLineWidth(0.25);
-    pdoc.line(mg+third,43,mg+third,54);pdoc.line(mg+third*2,43,mg+third*2,54);
-    const drawCell=(label,value,x)=>{pdoc.setFontSize(7.5);pdoc.setFont(undefined,'bold');pdoc.setTextColor(26,46,74);pdoc.text(label,x+4,47);pdoc.setFont(undefined,'normal');pdoc.setTextColor(50,65,85);pdoc.text(pdoc.splitTextToSize(value||'—',third-10),x+4,52);};
-    drawCell('TITULAR',uT,mg);drawCell('CUIT',uCuit,mg+third);drawCell('COMPAÑÍA',uCo.name,mg+third*2);
-    let y=62;const usable=W-mg*2;
-    const colW=[22,12,26,26,26,16,13,13],cols=[mg];
-    colW.forEach((w,i)=>{if(i>0)cols.push(cols[i-1]+colW[i-1]);});
-    const rowH=9;
-    pdoc.setFontSize(8.5);pdoc.setFont(undefined,'bold');pdoc.setTextColor(26,46,74);
-    pdoc.text('TABLA DE COTIZACIÓN',mg,y);pdoc.setDrawColor(26,46,74);pdoc.setLineWidth(0.4);pdoc.line(mg,y+1.5,W-mg,y+1.5);y+=6;
-    pdoc.setFillColor(26,46,74);pdoc.rect(mg,y,usable,rowH,'F');
-    pdoc.setTextColor(255,255,255);pdoc.setFontSize(6.5);pdoc.setFont(undefined,'bold');
-    ['Cultivo','Ha','Depto/Partido','Provincia','Coberturas','Tasa S/IVA','F/D','Resiembra'].forEach((h,i)=>pdoc.text(h,cols[i]+1.5,y+6));
-    y+=rowH;
-    uFilas.forEach((f,fi)=>{
-      if(y>265){pdoc.addPage();y=20;}
-      pdoc.setFillColor(fi%2===0?255:245,fi%2===0?255:247,fi%2===0?255:250);
-      pdoc.rect(mg,y,usable,rowH,'F');
-      pdoc.setDrawColor(220,226,235);pdoc.setLineWidth(0.25);pdoc.rect(mg,y,usable,rowH,'S');
-      pdoc.setTextColor(50,65,85);pdoc.setFontSize(7);pdoc.setFont(undefined,'normal');
-      [uCu.name,f.ha||'—',f.depto||'—',f.provincia||'—',cobStr,(f.tasa?(f.tasa+'%'):'—'),f.franq||'—',f.resiembra?f.resiembra.replace('%','')+'%':'—'].forEach((v,i)=>pdoc.text(pdoc.splitTextToSize(v,colW[i]-2),cols[i]+1.5,y+6));
-      y+=rowH;
-    });
+
+    // Logo (solo si fue subido desde Config)
+    if(logoDataURL){try{pdoc.addImage(logoDataURL,'JPEG',mg,3,55,24);}catch(e){}}
+
+    // Título y datos del cotizador en el header
+    pdoc.setTextColor(255,255,255);
+    pdoc.setFontSize(10);pdoc.setFont(undefined,'bold');
+    const tRight=W-mg;
+    if(cotConfig2.empresa){pdoc.text(cotConfig2.empresa,tRight,10,{align:'right'});}
+    pdoc.setFontSize(8.5);pdoc.setFont(undefined,'normal');
+    const infoLines=[];
+    if(cotConfig2.rubro)infoLines.push(cotConfig2.rubro);
+    if(ciudad)infoLines.push(ciudad);
+    if(cotConfig2.tel)infoLines.push('Tel: '+cotConfig2.tel);
+    infoLines.forEach((l,i)=>pdoc.text(l,tRight,15+i*4.5,{align:'right'}));
+
+    let y=38;
+    pdoc.setTextColor(26,46,74);
+
+    // Titular y CUIT
+    pdoc.setFontSize(16);pdoc.setFont(undefined,'bold');
+    pdoc.text(uT||'Sin titular',mg,y);y+=8;
+    if(uCuit&&uCuit!=='—'){
+      pdoc.setFontSize(9.5);pdoc.setFont(undefined,'normal');pdoc.setTextColor(100,116,139);
+      pdoc.text('CUIT: '+uCuit,mg,y);y+=6;
+    }
+    pdoc.setTextColor(26,46,74);
+    pdoc.setFontSize(9);pdoc.setFont(undefined,'normal');
+    pdoc.text('Fecha: '+fecha,mg,y);y+=8;
+
     pdoc.setDrawColor(180,190,205);pdoc.setLineWidth(0.5);pdoc.line(mg,y,W-mg,y);y+=8;
 
-    // ── Función para renderizar texto con formato **negrita**
-    const drawRichText=(text,x,sY,maxW,lH)=>{
-      const lineH=lH||5.8;
-      let curY=sY;
-      if(!text)return curY;
-      // Procesar cada linea del texto (separadas por salto de linea)
-      const lineasTexto=text.split(String.fromCharCode(10));
-      lineasTexto.forEach(linea=>{
-        if(!linea.trim()){curY+=lineH;return;}
-        // Detectar si la linea empieza con ** (es un campo: **Label:** valor)
-        if(linea.startsWith('**')){
-          const endBold=linea.indexOf('**',2);
-          if(endBold>0){
-            const label=linea.substring(2,endBold);
-            const valor=linea.substring(endBold+2).replace(/^:\s*/,'');
-            // Imprimir label en negrita
-            pdoc.setFont(undefined,'bold');
-            pdoc.setFontSize(9.5);
-            const labelW=pdoc.getTextWidth(label+' ');
-            pdoc.text(label,x,curY);
-            // Imprimir valor en normal al lado
-            pdoc.setFont(undefined,'normal');
-            if(valor.trim()){
-              const valorLines=pdoc.splitTextToSize(valor.trim(),maxW-labelW);
-              pdoc.text(valorLines,x+labelW,curY);
-              curY+=valorLines.length*lineH;
-            } else {
-              curY+=lineH;
-            }
-          } else {
-            pdoc.setFont(undefined,'normal');
-            const ls=pdoc.splitTextToSize(linea,maxW);
-            pdoc.text(ls,x,curY);
-            curY+=ls.length*lineH;
-          }
-        } else {
-          pdoc.setFont(undefined,'normal');
-          pdoc.setFontSize(9.5);
-          const ls=pdoc.splitTextToSize(linea,maxW);
-          pdoc.text(ls,x,curY);
-          curY+=ls.length*lineH;
-        }
-      });
-      return curY+lineH;
-    };
-
+    // Compañía y cultivo
     const secTitle=(label)=>{
       if(y>252){pdoc.addPage();y=20;}
       pdoc.setFontSize(8.5);pdoc.setFont(undefined,'bold');pdoc.setTextColor(26,46,74);
@@ -1146,48 +947,102 @@ function CotizadorApp() {
       y+=7;
     };
 
-    // ── Descripción del cultivo
+    secTitle('COMPANIA / CULTIVO');
+    pdoc.setFontSize(9.5);pdoc.setFont(undefined,'normal');pdoc.setTextColor(55,68,85);
+    pdoc.text(uCo.name+' — '+uCu.name,mg,y);y+=8;
+
+    // Tabla de hectáreas
+    secTitle('DETALLE DE HECTAREAS');
+    const cols=[mg,50,90,130,155,175],colW=[32,40,40,25,20,22];
+    const headers=['Depto/Partido','Provincia','Cobertura','Tasa S/IVA','Franquicia','Resiembra'];
+    pdoc.setFillColor(230,238,248);pdoc.rect(mg,y-4,W-mg*2,7,'F');
+    headers.forEach((h,i)=>{pdoc.setFontSize(8);pdoc.setFont(undefined,'bold');pdoc.setTextColor(26,46,74);pdoc.text(h,cols[i]+1.5,y);});
+    y+=5;pdoc.setDrawColor(200,210,225);pdoc.setLineWidth(0.3);pdoc.line(mg,y,W-mg,y);y+=2;
+
+    let cobStr='G+I+IR+R';
+    uAdicSel.forEach(name=>{const ad=(uCu.adicionales||[]).find(a=>a.name===name);if(ad&&ad.abrev)cobStr+='+'+ad.abrev;});
+
+    const rowH=8;
+    uFilas.forEach((f,fi)=>{
+      if(y>272){pdoc.addPage();y=20;}
+      const rowBgColor=fi%2===0?[248,250,253]:[255,255,255];
+      pdoc.setFillColor(...rowBgColor);pdoc.rect(mg,y-5,W-mg*2,rowH,'F');
+      pdoc.setFontSize(9);pdoc.setFont(undefined,'normal');pdoc.setTextColor(55,68,85);
+      const tasaStr=f.tasa?(f.tasa+'%'):'—';
+      const resiembraStr=f.resiembra?f.resiembra.replace('%','')+'%':'—';
+      [f.depto||'—',f.provincia||'—',cobStr,tasaStr,f.franq||'—',resiembraStr].forEach((v,i)=>{
+        pdoc.text(pdoc.splitTextToSize(v,colW[i]-2),cols[i]+1.5,y);
+      });
+      y+=rowH;
+    });
+    y+=4;
+
+    // Función para renderizar texto (sin regex)
+    const drawRichText=(text,x,sY,maxW,lH)=>{
+      const lineH=lH||5.8;
+      let curY=sY;
+      if(!text)return curY;
+      const lineasTexto=text.split(String.fromCharCode(10));
+      lineasTexto.forEach(linea=>{
+        if(!linea.trim()){curY+=lineH;return;}
+        if(linea.startsWith('**')){
+          const endBold=linea.indexOf('**',2);
+          if(endBold>0){
+            const label=linea.substring(2,endBold);
+            const valor=linea.substring(endBold+2).replace(/^:?\s*/,'');
+            pdoc.setFont(undefined,'bold');
+            pdoc.setFontSize(9.5);
+            const labelW=pdoc.getTextWidth(label+' ');
+            pdoc.text(label+':',x,curY);
+            pdoc.setFont(undefined,'normal');
+            if(valor.trim()){
+              const valorLines=pdoc.splitTextToSize(valor.trim(),maxW-labelW);
+              pdoc.text(valorLines,x+labelW,curY);
+              curY+=valorLines.length*lineH;
+            } else { curY+=lineH; }
+          } else {
+            pdoc.setFont(undefined,'normal');
+            const ls=pdoc.splitTextToSize(linea,maxW);
+            pdoc.text(ls,x,curY);curY+=ls.length*lineH;
+          }
+        } else {
+          pdoc.setFont(undefined,'normal');
+          pdoc.setFontSize(9.5);
+          const ls=pdoc.splitTextToSize(linea,maxW);
+          pdoc.text(ls,x,curY);curY+=ls.length*lineH;
+        }
+      });
+      return curY+lineH;
+    };
+
+    // Descripción de cobertura
     if(uCu.desc){
-      secTitle('DESCRIPCIÓN DE COBERTURA');
+      secTitle('DESCRIPCION DE COBERTURA');
       pdoc.setTextColor(55,68,85);
       y=drawRichText(uCu.desc,mg,y,W-mg*2);
       y+=4;
     }
 
-    // ── Franquicias usadas
-    const franqsObj=[];
-    uFilas.forEach(f=>{if(f.franq&&!franqsObj.find(x=>x.name===f.franq))franqsObj.push(f.franq);});
-    if(franqsObj.length){
-      secTitle('FRANQUICIA / DEDUCIBLE');
-      franqsObj.forEach(fname=>{
-        const item=franqsGlobal.find(f=>f.name===fname);
-        if(!item)return;
-        if(y>252){pdoc.addPage();y=20;}
-        pdoc.setFontSize(9.5);pdoc.setFont(undefined,'bold');pdoc.setTextColor(26,46,74);
-        const nw=pdoc.getTextWidth(item.name+': ');
-        pdoc.text(item.name+': ',mg,y);
-        pdoc.setFont(undefined,'normal');pdoc.setTextColor(55,68,85);
-        const dl=pdoc.splitTextToSize(item.desc,W-mg*2-nw);
-        pdoc.text(dl,mg+nw,y);
-        y+=dl.length*5.8+4;
-      });
-    }
-
-    // ── Carencia
-    if(carencia){
+    // Carencia
+    if(uCo.carencia){
+      const car=uCo.carencia;
       secTitle('CARENCIA');
-      pdoc.setFontSize(9.5);
-      pdoc.setFont(undefined,'bold');pdoc.setTextColor(26,46,74);pdoc.text('Granizo: ',mg,y);
-      pdoc.setFont(undefined,'normal');pdoc.setTextColor(55,68,85);
-      const gl=pdoc.splitTextToSize((carencia.granizo||'')+' — '+(carencia.descGranizo||''),W-mg*2-20);
-      pdoc.text(gl,mg+20,y);y+=gl.length*5.5+3;
-      pdoc.setFont(undefined,'bold');pdoc.setTextColor(26,46,74);pdoc.text('Adicionales: ',mg,y);
-      pdoc.setFont(undefined,'normal');pdoc.setTextColor(55,68,85);
-      const al=pdoc.splitTextToSize((carencia.adicionales||'')+' — '+(carencia.descAdicionales||''),W-mg*2-24);
-      pdoc.text(al,mg+24,y);y+=al.length*5.5+6;
+      pdoc.setFontSize(9.5);pdoc.setTextColor(55,68,85);
+      if(car.granizo){
+        pdoc.setFont(undefined,'bold');pdoc.text('Granizo: ',mg,y);
+        pdoc.setFont(undefined,'normal');
+        const g=pdoc.splitTextToSize(car.granizo+(car.descGranizo?' - '+car.descGranizo:''),W-mg*2-20);
+        pdoc.text(g,mg+20,y);y+=g.length*5.5+3;
+      }
+      if(car.adicionales){
+        pdoc.setFont(undefined,'bold');pdoc.text('Adicionales: ',mg,y);
+        pdoc.setFont(undefined,'normal');
+        const a=pdoc.splitTextToSize(car.adicionales+(car.descAdicionales?' - '+car.descAdicionales:''),W-mg*2-28);
+        pdoc.text(a,mg+28,y);y+=a.length*5.5+6;
+      }
     }
 
-    // ── Inicio de cobertura
+    // Inicio de cobertura
     if(uCu.inicioCobertura){
       secTitle('INICIO DE COBERTURA PLENA');
       pdoc.setFontSize(9.5);pdoc.setFont(undefined,'normal');pdoc.setTextColor(55,68,85);
@@ -1195,35 +1050,15 @@ function CotizadorApp() {
       pdoc.text(il,mg,y);y+=il.length*5.5+6;
     }
 
-    // ── Adicionales seleccionados
-    if(adicItems.length){
-      secTitle('ADICIONALES');
-      adicItems.forEach(a=>{
-        if(y>252){pdoc.addPage();y=20;}
-        pdoc.setFontSize(10);pdoc.setFont(undefined,'bold');pdoc.setTextColor(26,46,74);
-        pdoc.text(a.name,mg,y);y+=6;
-        const parts2=[];
-        if(a.tipo)parts2.push(a.tipo);
-        if(a.deducible)parts2.push('Deducible: '+a.deducible);
-        if(a.carencia)parts2.push('Carencia: '+a.carencia);
-        if(a.inicioVig)parts2.push('Inicio: '+a.inicioVig);
-        if(a.finVig)parts2.push('Fin: '+a.finVig);
-        if(parts2.length){
-          pdoc.setFontSize(9);pdoc.setFont(undefined,'normal');pdoc.setTextColor(55,68,85);
-          const dl2=pdoc.splitTextToSize(parts2.join(' | '),W-mg*2);
-          pdoc.text(dl2,mg,y);y+=dl2.length*5.5+4;
-        }
-      });
-    }
-
-    // ── Tipo de contratación
+    // Tipo de contratación
+    const ct=uCo.contratacion||{};
     if(uContratSel&&uContratSel.size){
-      secTitle('TIPO DE CONTRATACIÓN');
+      secTitle('TIPO DE CONTRATACION');
       Array.from(uContratSel).forEach(k=>{
         if(!ct[k])return;
         if(y>252){pdoc.addPage();y=20;}
         pdoc.setFontSize(9);pdoc.setFont(undefined,'bold');pdoc.setTextColor(26,46,74);
-        const lbl=k.charAt(0).toUpperCase()+k.slice(1)+': ';
+        const lbl=(k.charAt(0).toUpperCase()+k.slice(1))+': ';
         const lw=pdoc.getTextWidth(lbl);
         pdoc.text(lbl,mg,y);
         pdoc.setFont(undefined,'normal');pdoc.setTextColor(55,68,85);
@@ -1232,15 +1067,15 @@ function CotizadorApp() {
       });
     }
 
-    // ── Prórroga
+    // Prórroga
     if(uCo.prorroga){
-      secTitle('PRÓRROGA');
+      secTitle('PRORROGA');
       pdoc.setFontSize(9.5);pdoc.setFont(undefined,'normal');pdoc.setTextColor(55,68,85);
       const pl=pdoc.splitTextToSize(uCo.prorroga,W-mg*2);
       pdoc.text(pl,mg,y);y+=pl.length*5.8+4;
     }
 
-    // ── Fin de vigencia
+    // Fin de vigencia
     if(uCu.finVigencia){
       secTitle('FIN DE VIGENCIA');
       pdoc.setFontSize(9.5);pdoc.setFont(undefined,'normal');pdoc.setTextColor(55,68,85);
@@ -1248,31 +1083,33 @@ function CotizadorApp() {
       pdoc.text(fl,mg,y);y+=fl.length*5.5+6;
     }
 
-    // ── Pie de página
-    pdoc.setDrawColor(26,46,74);pdoc.setLineWidth(0.4);pdoc.line(mg,278,W-mg,278);
-    pdoc.setFontSize(8);pdoc.setTextColor(130,145,165);pdoc.setFont(undefined,'normal');
-    const fp=[];
-    if(cotConfig.tel)fp.push('Tel: '+cotConfig.tel);
-    if(cotConfig.email)fp.push(cotConfig.email);
-    if(cotConfig.pie)fp.push(cotConfig.pie);
-    if(fp.length)pdoc.text(fp.join('   |   '),W/2,283,{align:'center'});
-    pdoc.text('Documento generado el '+fecha,W/2,289,{align:'center'});
-
+    // Observaciones
     if(uObs&&uObs.trim()){
       secTitle('OBSERVACIONES');
       pdoc.setFontSize(9.5);pdoc.setFont(undefined,'normal');pdoc.setTextColor(55,68,85);
       const ol=pdoc.splitTextToSize(uObs.trim(),W-mg*2);
       pdoc.text(ol,mg,y);y+=ol.length*5.5+4;
     }
+
+    // Pie de página
+    pdoc.setDrawColor(26,46,74);pdoc.setLineWidth(0.4);pdoc.line(mg,278,W-mg,278);
+    pdoc.setFontSize(8);pdoc.setTextColor(130,145,165);pdoc.setFont(undefined,'normal');
+    const fp=[];
+    if(cotConfig2.tel)fp.push('Tel: '+cotConfig2.tel);
+    if(cotConfig2.email)fp.push(cotConfig2.email);
+    if(cotConfig2.pie)fp.push(cotConfig2.pie);
+    if(fp.length)pdoc.text(fp.join('   |   '),W/2,283,{align:'center'});
+    pdoc.text('Documento generado el '+fecha,W/2,289,{align:'center'});
+
     pdoc.save('Cotizacion_'+uCu.name.replace(/\s+/g,'_')+'.pdf');
   };
 
   const descargarPDFHistorial = (c) => {
     const ci=cotData.findIndex(co=>co.name===c.compania);
-    if(ci===-1){alert('Compañía no encontrada.');return;}
+    if(ci===-1){alert('Compa\u00f1\u00eda no encontrada.');return;}
     const vi=cotData[ci].cultivos.findIndex(cu=>cu.name===c.cultivo);
     if(vi===-1){alert('Cultivo no encontrado.');return;}
-    generatePDF(c.titular!=='Sin titular'?c.titular:'',c.cuit!=='—'?c.cuit:'',cotData[ci],cotData[ci].cultivos[vi],c.filas,new Set(c.adicionales||[]),new Set(c.contratacion||[]),c.observaciones||'');
+    generatePDF(c.titular!=='Sin titular'?c.titular:'',c.cuit!=='\u2014'?c.cuit:'',cotData[ci],cotData[ci].cultivos[vi],c.filas,new Set(c.adicionales||[]),new Set(c.contratacion||[]));
   };
 
   const handleImport = (e) => {
@@ -1295,14 +1132,14 @@ function CotizadorApp() {
     const iCultivo=cobHdrs.findIndex(h=>h.toLowerCase().includes('cultivo'));
     const iCompania=cobHdrs.findIndex(h=>h.toLowerCase().includes('compa'));
     const descCols=cobHdrs.map((h,i)=>i!==iCultivo&&i!==iCompania?{idx:i,name:h}:null).filter(Boolean);
-    getRows(['cobertura']).forEach(row=>{const cultivo=String(row[iCultivo]||'').trim(),compania=String(row[iCompania]||'').trim();if(!cultivo||!compania)return;const cu=ensureCu(ensureCo(compania),cultivo);cu.desc=descCols.filter(c=>String(row[c.idx]||'').trim()!=='').map(c=>'**'+c.name+':** '+String(row[c.idx]).trim()).join('\n');});
+    getRows(['cobertura']).forEach(row=>{const cultivo=String(row[iCultivo]||'').trim(),compania=String(row[iCompania]||'').trim();if(!cultivo||!compania)return;const cu=ensureCu(ensureCo(compania),cultivo);cu.desc=descCols.filter(c=>String(row[c.idx]||'').trim()!=='').map(c=>'**'+c.name+':** '+String(row[c.idx]).trim()).join(String.fromCharCode(10));});
     getRows(['resiembra']).forEach(row=>{const comp=String(row[0]||'').trim(),val=String(row[1]||'').trim().replace('%','').replace('R','');if(!comp||!val)return;const co=ensureCo(comp);if(!co.resiembra.includes(val))co.resiembra.push(val);});
     getRows(['franq','ded']).forEach(row=>{const name=String(row[0]||'').trim(),desc=String(row[1]||'').trim();if(!name||!desc)return;if(!result.franqsGlobal.find(f=>f.name===name))result.franqsGlobal.push({name,desc});});
     getRows(['carencia']).forEach(row=>{const comp=String(row[0]||'').trim(),granizo=String(row[1]||'').trim(),descGranizo=String(row[2]||'').trim(),adicionales=String(row[3]||'').trim(),descAdicionales=String(row[4]||'').trim();if(!comp||!granizo)return;ensureCo(comp).carencia.push({granizo,descGranizo,adicionales,descAdicionales});});
     getRows(['inicio']).forEach(row=>{const cultivo=String(row[0]||'').trim(),comp=String(row[1]||'').trim(),inicio=String(row[2]||'').trim();if(!cultivo||!comp||!inicio)return;ensureCu(ensureCo(comp),cultivo).inicioCobertura=inicio;});
     getRows(['fin']).forEach(row=>{const cultivo=String(row[0]||'').trim(),comp=String(row[1]||'').trim(),fin=String(row[2]||'').trim();if(!cultivo||!comp||!fin)return;ensureCu(ensureCo(comp),cultivo).finVigencia=fin;});
     ['planchado','helada','viento'].forEach(tipo=>{getRows([tipo]).forEach(row=>{const comp=String(row[0]||'').trim();if(!comp)return;const co=ensureCo(comp);const adic={name:String(row[2]||'').trim()||tipo,abrev:String(row[1]||'').trim(),tipo:String(row[2]||'').trim(),deducible:String(row[3]||'').trim(),carencia:String(row[4]||'').trim(),inicioVig:String(row[5]||'').trim(),finVig:String(row[6]||'').trim(),etapa:String(row[7]||'').trim(),limGeo:String(row[8]||'').trim(),suscripcion:String(row[9]||'').trim()};Object.values(co.cultivos).forEach(cu=>{if(!cu.adicionales.find(a=>a.name===adic.name&&a.deducible===adic.deducible))cu.adicionales.push(adic);});});});
-    getRows(['prorroga','prórroga']).forEach(row=>{const comp=String(row[0]||'').trim(),val=String(row[1]||'').trim();if(!comp||!val)return;ensureCo(comp).prorroga=val;});
+    getRows(['prorroga','pr\u00f3rroga']).forEach(row=>{const comp=String(row[0]||'').trim(),val=String(row[1]||'').trim();if(!comp||!val)return;ensureCo(comp).prorroga=val;});
     getRows(['contrat']).forEach(row=>{const comp=String(row[0]||'').trim();if(!comp)return;ensureCo(comp).contratacion={pesos:String(row[1]||'').trim(),dolares:String(row[2]||'').trim(),quintales:String(row[3]||'').trim()};});
     return result;
   };
@@ -1322,7 +1159,7 @@ function CotizadorApp() {
   const lbl2={fontSize:11,color:"#4a6080",display:"block",marginBottom:4,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4};
   const card2={background:"white",borderRadius:10,padding:20,boxShadow:"0 2px 8px rgba(26,46,74,.08)",marginBottom:16,border:"1px solid #e2e8f0"};
   const cardTitle2={fontSize:15,fontWeight:700,color:"#1a2e4a",marginBottom:14,display:"flex",alignItems:"center",gap:8,borderLeft:"3px solid #4a9fd4",paddingLeft:10};
-  const tabs2=[{id:'consulta',label:'🔍 Consulta'},{id:'historial',label:'📄 Cotizaciones'},{id:'datos',label:'🌱 Base de Datos'},{id:'importar',label:'📥 Importar'},{id:'config',label:'⚙️ Config'}];
+  const tabs2=[{id:'consulta',label:'\ud83d\udd0d Consulta'},{id:'historial',label:'\ud83d\udcc4 Cotizaciones'},{id:'datos',label:'\ud83c\udf31 Base de Datos'},{id:'importar',label:'\ud83d\udce5 Importar'},{id:'config',label:'\u2699\ufe0f Config'}];
 
   return (
     <div style={{display:"flex",flexDirection:"column",height:"100%",overflow:"hidden"}}>
@@ -1342,24 +1179,24 @@ function CotizadorApp() {
         {cotTab==='consulta' && (
           <div>
             <div style={card2}>
-              <div style={cardTitle2}>👤 Datos del Titular</div>
+              <div style={cardTitle2}>\ud83d\udc64 Datos del Titular</div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-                <div><label style={lbl2}>Titular</label><input value={titular} onChange={e=>setTitular(e.target.value)} placeholder="Nombre completo o razón social" style={inp2}/></div>
+                <div><label style={lbl2}>Titular</label><input value={titular} onChange={e=>setTitular(e.target.value)} placeholder="Nombre completo o raz\u00f3n social" style={inp2}/></div>
                 <div><label style={lbl2}>CUIT</label><input value={cuit} onChange={e=>setCuit(e.target.value)} placeholder="Ej: 20-12345678-9" style={inp2}/></div>
               </div>
             </div>
             <div style={card2}>
-              <div style={cardTitle2}>🏢 Compañía y Cultivo</div>
+              <div style={cardTitle2}>\ud83c\udfe2 Compa\u00f1\u00eda y Cultivo</div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-                <div><label style={lbl2}>Compañía</label>
+                <div><label style={lbl2}>Compa\u00f1\u00eda</label>
                   <select value={selCompany} onChange={e=>onCompanyChange(e.target.value)} style={sel2}>
-                    <option value="">-- Seleccioná --</option>
+                    <option value="">-- Seleccion\u00e1 --</option>
                     {cotData.map((c,i)=><option key={i} value={i}>{c.name}</option>)}
                   </select>
                 </div>
                 <div><label style={lbl2}>Cultivo</label>
                   <select value={selCultivo} onChange={e=>onCultivoChange(e.target.value)} disabled={!co} style={sel2}>
-                    <option value="">-- Seleccioná --</option>
+                    <option value="">-- Seleccion\u00e1 --</option>
                     {co && co.cultivos.map((c,i)=><option key={i} value={i}>{c.name}</option>)}
                   </select>
                 </div>
@@ -1367,23 +1204,23 @@ function CotizadorApp() {
             </div>
             {cu && (
               <div style={card2}>
-                <div style={cardTitle2}>📊 Tabla de Cotización</div>
+                <div style={cardTitle2}>\ud83d\udcca Tabla de Cotizaci\u00f3n</div>
                 {filas.map((f,i)=>(
                   <div key={i} style={{background:"#f8fafc",border:"1.5px solid #d0dce8",borderRadius:8,padding:12,marginBottom:8,position:"relative"}}>
-                    {filas.length>1 && <button onClick={()=>setFilas(filas.filter((_,idx)=>idx!==i))} style={{position:"absolute",top:8,right:8,background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:4,padding:"1px 8px",cursor:"pointer",fontSize:11,fontWeight:700}}>✕</button>}
+                    {filas.length>1 && <button onClick={()=>setFilas(filas.filter((_,idx)=>idx!==i))} style={{position:"absolute",top:8,right:8,background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:4,padding:"1px 8px",cursor:"pointer",fontSize:11,fontWeight:700}}>\u2715</button>}
                     <div style={{fontSize:10,fontWeight:700,color:"#4a9fd4",marginBottom:8,textTransform:"uppercase"}}>FILA {i+1}</div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:8}}>
-                      <div><label style={lbl2}>Hectáreas</label><input value={f.ha} onChange={e=>setFila(i,'ha',e.target.value)} placeholder="Ej: 150" style={inp2}/></div>
+                      <div><label style={lbl2}>Hect\u00e1reas</label><input value={f.ha} onChange={e=>setFila(i,'ha',e.target.value)} placeholder="Ej: 150" style={inp2}/></div>
                       <div><label style={lbl2}>Depto / Partido</label><input value={f.depto} onChange={e=>setFila(i,'depto',e.target.value)} placeholder="Ej: Gral. Belgrano" style={inp2}/></div>
                     </div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
                       <div><label style={lbl2}>Provincia</label>
                         <select value={f.provincia} onChange={e=>setFila(i,'provincia',e.target.value)} style={sel2}>
-                          <option value="">-- Seleccioná --</option>
+                          <option value="">-- Seleccion\u00e1 --</option>
                           {PROVINCIAS_COT.map(p=><option key={p}>{p}</option>)}
                         </select>
                       </div>
-                      <div><label style={lbl2}>Tasa S/IVA (%)</label><div style={{position:"relative"}}><input value={f.tasa} onChange={e=>setFila(i,'tasa',e.target.value.replace('%',''))} placeholder="Ej: 2.82" style={{...inp2,paddingRight:22}}/><span style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",color:"#64748b",fontSize:13,pointerEvents:"none"}}>%</span></div></div>
+                      <div><label style={lbl2}>Tasa S/IVA</label><input value={f.tasa} onChange={e=>setFila(i,'tasa',e.target.value)} placeholder="Ej: 2.82%" style={inp2}/></div>
                       <div><label style={lbl2}>Franq / Ded</label>
                         <select value={f.franq} onChange={e=>setFila(i,'franq',e.target.value)} style={sel2}>
                           <option value="">--</option>
@@ -1405,7 +1242,7 @@ function CotizadorApp() {
             )}
             {cu && (cu.adicionales||[]).length>0 && (
               <div style={card2}>
-                <div style={cardTitle2}>⚡ Adicionales</div>
+                <div style={cardTitle2}>\u26a1 Adicionales</div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:8,marginTop:6}}>
                   {[...new Map((cu.adicionales||[]).map(a=>[a.name,a])).values()].map(a=>(
                     <button key={a.name} onClick={()=>toggleAdic(a.name)} style={{border:"1.5px solid",borderRadius:7,padding:"7px 16px",cursor:"pointer",fontSize:13,fontWeight:600,background:adicSel.has(a.name)?"#1a2e4a":"#f8fafc",color:adicSel.has(a.name)?"white":"#4a6080",borderColor:adicSel.has(a.name)?"#1a2e4a":"#d0dce8",fontFamily:"inherit"}}>
@@ -1417,7 +1254,7 @@ function CotizadorApp() {
             )}
             {co && (co.contratacion?.pesos||co.contratacion?.dolares||co.contratacion?.quintales) && (
               <div style={card2}>
-                <div style={cardTitle2}>💰 Tipo de Contratación</div>
+                <div style={cardTitle2}>\ud83d\udcb0 Tipo de Contrataci\u00f3n</div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:8,marginTop:6}}>
                   {['pesos','dolares','quintales'].filter(k=>co.contratacion[k]).map(k=>(
                     <button key={k} onClick={()=>toggleContrat(k)} style={{border:"1.5px solid",borderRadius:7,padding:"7px 16px",cursor:"pointer",fontSize:13,fontWeight:600,background:contratSel.has(k)?"#2e7d52":"#f8fafc",color:contratSel.has(k)?"white":"#4a6080",borderColor:contratSel.has(k)?"#2e7d52":"#d0dce8",fontFamily:"inherit"}}>
@@ -1429,24 +1266,24 @@ function CotizadorApp() {
             )}
             {cu && (
               <div style={card2}>
-                <div style={cardTitle2}>📋 Resumen de Cotización</div>
+                <div style={cardTitle2}>\ud83d\udccb Resumen de Cotizaci\u00f3n</div>
                 <div style={{fontSize:11,color:"#4a9fd4",fontWeight:700,marginBottom:2,textTransform:"uppercase"}}>{co.name}</div>
                 <div style={{fontSize:20,fontWeight:700,color:"#1a2e4a",marginBottom:10}}>{cu.name}</div>
                 <div style={{overflowX:"auto",marginTop:14}}>
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
                     <thead><tr>{['Cultivo','Ha','Depto','Provincia','Coberturas','Tasa S/IVA','F/D','Resiembra'].map(h=><th key={h} style={{background:"#1a2e4a",color:"white",padding:"7px 8px",textAlign:"left"}}>{h}</th>)}</tr></thead>
-                    <tbody>{filas.map((f,i)=><tr key={i} style={{background:i%2===0?"white":"#f8fafc"}}><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{cu.name}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{f.ha||'—'}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{f.depto||'—'}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{f.provincia||'—'}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{cob}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{f.tasa||'—'}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{f.franq||'—'}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{f.resiembra?f.resiembra.replace('%','')+'%':'—'}</td></tr>)}</tbody>
+                    <tbody>{filas.map((f,i)=><tr key={i} style={{background:i%2===0?"white":"#f8fafc"}}><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{cu.name}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{f.ha||'\u2014'}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{f.depto||'\u2014'}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{f.provincia||'\u2014'}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{cob}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{f.tasa||'\u2014'}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{f.franq||'\u2014'}</td><td style={{padding:"6px 8px",borderBottom:"1px solid #e2e8f0"}}>{f.resiembra?f.resiembra+'%':'\u2014'}</td></tr>)}</tbody>
                   </table>
                 </div>
-                <div style={card2}>
-                  <div style={cardTitle2}>📝 Observaciones</div>
-                  <textarea value={observaciones} onChange={e=>setObservaciones(e.target.value)} rows={3} placeholder="Observaciones adicionales para incluir al final del PDF..." style={{...inp2,resize:"vertical",width:"100%"}}/>
+                <div style={{background:"#f8fafc",borderRadius:10,padding:"14px 16px",border:"1px solid #e2e8f0",marginBottom:14}}>
+                  <div style={{fontSize:13,fontWeight:700,color:"#1a2e4a",marginBottom:8}}>Observaciones</div>
+                  <textarea value={observaciones} onChange={e=>setObservaciones(e.target.value)} rows={3} placeholder="Observaciones adicionales (aparecen al final del PDF)..." style={{width:"100%",padding:"8px 10px",border:"1px solid #e2e8f0",borderRadius:7,fontSize:13,fontFamily:"inherit",resize:"vertical",boxSizing:"border-box"}}/>
                 </div>
                 <div style={{display:"flex",gap:10,marginTop:14}}>
-                  <button onClick={()=>generatePDF()} style={{flex:1,background:"#1a2e4a",color:"white",border:"none",borderRadius:8,padding:13,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>⬇️ Descargar PDF</button>
-                  <button onClick={guardarCotizacion} style={{padding:"13px 20px",background:"#2e7d52",color:"white",border:"none",borderRadius:8,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>💾 Guardar</button>
+                  <button onClick={()=>generatePDF()} style={{flex:1,background:"#1a2e4a",color:"white",border:"none",borderRadius:8,padding:13,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>\u2b07\ufe0f Descargar PDF</button>
+                  <button onClick={guardarCotizacion} style={{padding:"13px 20px",background:"#2e7d52",color:"white",border:"none",borderRadius:8,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>\ud83d\udcbe Guardar</button>
                 </div>
-                {savedOk&&<div style={{background:"#dcfce7",border:"1px solid #22c55e",borderRadius:7,padding:"8px 12px",marginTop:10,color:"#166534",fontWeight:700,fontSize:13}}>✅ Cotización guardada y sincronizada</div>}
+                {savedOk&&<div style={{background:"#dcfce7",border:"1px solid #22c55e",borderRadius:7,padding:"8px 12px",marginTop:10,color:"#166534",fontWeight:700,fontSize:13}}>\u2705 Cotizaci\u00f3n guardada y sincronizada</div>}
               </div>
             )}
           </div>
@@ -1456,11 +1293,11 @@ function CotizadorApp() {
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
               <div style={{fontSize:17,fontWeight:700,color:"#1a2e4a"}}>Cotizaciones Guardadas</div>
               <div style={{display:"flex",gap:8}}>
-                <button onClick={exportarExcel} style={{background:"#2e7d52",color:"white",border:"none",borderRadius:6,padding:"7px 12px",cursor:"pointer",fontSize:12,fontWeight:700}}>📊 Exportar Excel</button>
-                <button onClick={async()=>{if(!confirm('¿Eliminar todas?'))return;for(const c of cotizaciones){await deleteDoc(fbDoc(db,'cotizaciones',c.firebaseId));}}} style={{background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:6,padding:"7px 12px",cursor:"pointer",fontSize:12,fontWeight:700}}>🗑️ Limpiar todo</button>
+                <button onClick={exportarExcel} style={{background:"#2e7d52",color:"white",border:"none",borderRadius:6,padding:"7px 12px",cursor:"pointer",fontSize:12,fontWeight:700}}>Exportar Excel</button>
+              <button onClick={async()=>{if(!confirm('\u00bfEliminar todas?'))return;for(const c of cotizaciones){await deleteDoc(fbDoc(db,'cotizaciones',c.firebaseId));}}} style={{background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:6,padding:"7px 12px",cursor:"pointer",fontSize:12,fontWeight:700}}>\ud83d\uddd1\ufe0f Limpiar todo</button>
               </div>
             </div>
-            {cotizaciones.length===0&&<div style={{textAlign:"center",color:"#94a3b8",padding:24,fontSize:14,background:"white",borderRadius:10,border:"1px solid #e2e8f0"}}>No hay cotizaciones guardadas aún.</div>}
+            {cotizaciones.length===0&&<div style={{textAlign:"center",color:"#94a3b8",padding:24,fontSize:14,background:"white",borderRadius:10,border:"1px solid #e2e8f0"}}>No hay cotizaciones guardadas a\u00fan.</div>}
             {cotizaciones.map((c)=>(
               <div key={c.firebaseId} style={{background:"white",borderRadius:10,padding:"14px 16px",marginBottom:12,boxShadow:"0 2px 6px rgba(26,46,74,.07)",border:"1px solid #e2e8f0"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10}}>
@@ -1469,14 +1306,14 @@ function CotizadorApp() {
                     <div style={{fontSize:16,fontWeight:700,color:"#1a2e4a",marginBottom:2}}>{c.titular}</div>
                     <div style={{fontSize:12,color:"#64748b",marginBottom:6}}>CUIT: {c.cuit}</div>
                     <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-                      <span style={{background:"#dbeafe",color:"#1e40af",fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:5}}>🏢 {c.compania}</span>
-                      <span style={{background:"#dcfce7",color:"#166534",fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:5}}>🌱 {c.cultivo}</span>
+                      <span style={{background:"#dbeafe",color:"#1e40af",fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:5}}>\ud83c\udfe2 {c.compania}</span>
+                      <span style={{background:"#dcfce7",color:"#166534",fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:5}}>\ud83c\udf31 {c.cultivo}</span>
                     </div>
                   </div>
                   <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0}}>
-                    <button onClick={()=>descargarPDFHistorial(c)} style={{background:"#1a2e4a",color:"white",border:"none",borderRadius:6,padding:"7px 14px",cursor:"pointer",fontSize:12,fontWeight:700}}>⬇️ PDF</button>
-                    <button onClick={()=>editarCotizacion(c)} style={{background:"#dbeafe",color:"#1a4080",border:"none",borderRadius:6,padding:"7px 14px",cursor:"pointer",fontSize:12,fontWeight:700}}>✏️ Editar</button>
-                    <button onClick={()=>eliminarCotizacion(c.firebaseId)} style={{background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:6,padding:"7px 14px",cursor:"pointer",fontSize:12,fontWeight:700}}>🗑️</button>
+                    <button onClick={()=>descargarPDFHistorial(c)} style={{background:"#1a2e4a",color:"white",border:"none",borderRadius:6,padding:"7px 14px",cursor:"pointer",fontSize:12,fontWeight:700}}>\u2b07\ufe0f PDF</button>
+                    <button onClick={()=>editarCotizacion(c)} style={{background:"#dbeafe",color:"#1a4080",border:"none",borderRadius:6,padding:"7px 14px",cursor:"pointer",fontSize:12,fontWeight:700}}>\u270f\ufe0f Editar</button>
+                    <button onClick={()=>eliminarCotizacion(c.firebaseId)} style={{background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:6,padding:"7px 14px",cursor:"pointer",fontSize:12,fontWeight:700}}>\ud83d\uddd1\ufe0f</button>
                   </div>
                 </div>
               </div>
@@ -1487,16 +1324,16 @@ function CotizadorApp() {
           <div>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
               <div style={{fontSize:17,fontWeight:700,color:"#1a2e4a"}}>Base de Datos</div>
-              <button onClick={()=>{setEditCompanyIdx(-1);setMCompanyName('');setModal('company');}} style={{background:"#1a2e4a",color:"white",border:"none",borderRadius:7,padding:"8px 16px",fontSize:13,fontWeight:700,cursor:"pointer"}}>+ Nueva Compañía</button>
+              <button onClick={()=>{setEditCompanyIdx(-1);setMCompanyName('');setModal('company');}} style={{background:"#1a2e4a",color:"white",border:"none",borderRadius:7,padding:"8px 16px",fontSize:13,fontWeight:700,cursor:"pointer"}}>+ Nueva Compa\u00f1\u00eda</button>
             </div>
-            {cotData.length===0&&<div style={{textAlign:"center",color:"#94a3b8",padding:24,fontSize:14,background:"white",borderRadius:10,border:"1px solid #e2e8f0"}}>No hay datos. Importá un Excel.</div>}
+            {cotData.length===0&&<div style={{textAlign:"center",color:"#94a3b8",padding:24,fontSize:14,background:"white",borderRadius:10,border:"1px solid #e2e8f0"}}>No hay datos. Import\u00e1 un Excel.</div>}
             {cotData.map((company,ci)=>(
               <div key={ci} style={{background:"white",borderRadius:10,padding:"14px 16px",marginBottom:12,boxShadow:"0 2px 6px rgba(26,46,74,.07)",border:"1px solid #e2e8f0"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                  <div style={{fontSize:15,fontWeight:700,color:"#1a2e4a"}}>🏢 {company.name}</div>
+                  <div style={{fontSize:15,fontWeight:700,color:"#1a2e4a"}}>\ud83c\udfe2 {company.name}</div>
                   <div style={{display:"flex",gap:5}}>
-                    <button onClick={()=>{setEditCompanyIdx(ci);setMCompanyName(company.name);setModal('company');}} style={{background:"#dbeafe",color:"#1a4080",border:"none",borderRadius:5,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>✏️</button>
-                    <button onClick={()=>deleteCompany(ci)} style={{background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:5,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>🗑️</button>
+                    <button onClick={()=>{setEditCompanyIdx(ci);setMCompanyName(company.name);setModal('company');}} style={{background:"#dbeafe",color:"#1a4080",border:"none",borderRadius:5,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>\u270f\ufe0f</button>
+                    <button onClick={()=>deleteCompany(ci)} style={{background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:5,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>\ud83d\uddd1\ufe0f</button>
                   </div>
                 </div>
               </div>
@@ -1505,19 +1342,19 @@ function CotizadorApp() {
         )}
         {cotTab==='importar' && (
           <div style={card2}>
-            <div style={cardTitle2}>📥 Importar desde Excel</div>
+            <div style={cardTitle2}>\ud83d\udce5 Importar desde Excel</div>
             <div onClick={()=>document.getElementById('fileImportCot').click()} style={{border:"2px dashed #4a9fd4",borderRadius:10,padding:30,textAlign:"center",background:"#f0f7ff",marginBottom:18,cursor:"pointer"}}>
-              <div style={{fontSize:32,marginBottom:8}}>📂</div>
+              <div style={{fontSize:32,marginBottom:8}}>\ud83d\udcc2</div>
               <div style={{fontWeight:700,color:"#4a9fd4",fontSize:15}}>Clic para seleccionar el archivo</div>
               <input type="file" id="fileImportCot" accept=".xlsx,.xls" style={{display:"none"}} onChange={handleImport}/>
             </div>
             {importPreview && (
               <div>
                 <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:12,marginBottom:14}}>
-                  <div style={{fontWeight:700,color:"#1a2e4a"}}>{Object.keys(importPreview.companies).length} compañías. Franquicias: {importPreview.franqsGlobal.length}.</div>
+                  <div style={{fontWeight:700,color:"#1a2e4a"}}>{Object.keys(importPreview.companies).length} compa\u00f1\u00edas. Franquicias: {importPreview.franqsGlobal.length}.</div>
                 </div>
                 <div style={{display:"flex",gap:10}}>
-                  <button onClick={executeImport} style={{background:"#4a9fd4",color:"white",border:"none",borderRadius:7,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>✅ Confirmar importación</button>
+                  <button onClick={executeImport} style={{background:"#4a9fd4",color:"white",border:"none",borderRadius:7,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>\u2705 Confirmar importaci\u00f3n</button>
                   <button onClick={()=>setImportPreview(null)} style={{background:"#e5e7eb",color:"#374151",border:"none",borderRadius:7,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>Cancelar</button>
                 </div>
               </div>
@@ -1526,27 +1363,27 @@ function CotizadorApp() {
         )}
         {cotTab==='config' && (
           <div style={card2}>
-            <div style={cardTitle2}>⚙️ Configuración del Membrete</div>
+            <div style={cardTitle2}>\u2699\ufe0f Configuraci\u00f3n del Membrete</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
               <div><label style={lbl2}>Nombre empresa</label><input value={cfgEmpresa} onChange={e=>setCfgEmpresa(e.target.value)} style={inp2}/></div>
-              <div><label style={lbl2}>Subtítulo</label><input value={cfgRubro} onChange={e=>setCfgRubro(e.target.value)} style={inp2}/></div>
-              <div><label style={lbl2}>Teléfono</label><input value={cfgTel} onChange={e=>setCfgTel(e.target.value)} style={inp2}/></div>
+              <div><label style={lbl2}>Subt\u00edtulo</label><input value={cfgRubro} onChange={e=>setCfgRubro(e.target.value)} style={inp2}/></div>
+              <div><label style={lbl2}>Tel\u00e9fono</label><input value={cfgTel} onChange={e=>setCfgTel(e.target.value)} style={inp2}/></div>
               <div><label style={lbl2}>Email</label><input value={cfgEmail} onChange={e=>setCfgEmail(e.target.value)} style={inp2}/></div>
               <div><label style={lbl2}>Ciudad (PDF)</label><input value={cfgCiudad} onChange={e=>setCfgCiudad(e.target.value)} style={inp2}/></div>
               <div><label style={lbl2}>Texto al pie</label><input value={cfgPie} onChange={e=>setCfgPie(e.target.value)} style={inp2}/></div>
             </div>
-            <button onClick={saveConfigCot} style={{background:"#2e7d52",color:"white",border:"none",borderRadius:7,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>💾 Guardar configuración</button>
-            {cfgSaved&&<div style={{color:"#2e7d52",fontSize:12,marginTop:7,fontWeight:700}}>✓ Guardado</div>}
+            <button onClick={saveConfigCot} style={{background:"#2e7d52",color:"white",border:"none",borderRadius:7,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>\ud83d\udcbe Guardar configuraci\u00f3n</button>
+            {cfgSaved&&<div style={{color:"#2e7d52",fontSize:12,marginTop:7,fontWeight:700}}>\u2713 Guardado</div>}
           </div>
         )}
       </div>
       {modal==='company'&&(
         <div style={{position:"fixed",inset:0,background:"rgba(10,20,40,.6)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
           <div style={{background:"white",borderRadius:12,padding:24,width:"95%",maxWidth:480}}>
-            <h3 style={{marginBottom:14,fontSize:16,fontWeight:700,color:"#1a2e4a"}}>{editCompanyIdx>=0?'Editar Compañía':'Nueva Compañía'}</h3>
+            <h3 style={{marginBottom:14,fontSize:16,fontWeight:700,color:"#1a2e4a"}}>{editCompanyIdx>=0?'Editar Compa\u00f1\u00eda':'Nueva Compa\u00f1\u00eda'}</h3>
             <input value={mCompanyName} onChange={e=>setMCompanyName(e.target.value)} style={{...inp2,marginBottom:14}}/>
             <div style={{display:"flex",gap:9}}>
-              <button onClick={saveCompany} style={{background:"#1a2e4a",color:"white",border:"none",borderRadius:7,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>💾 Guardar</button>
+              <button onClick={saveCompany} style={{background:"#1a2e4a",color:"white",border:"none",borderRadius:7,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>\ud83d\udcbe Guardar</button>
               <button onClick={()=>setModal(null)} style={{background:"#e5e7eb",color:"#374151",border:"none",borderRadius:7,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>Cancelar</button>
             </div>
           </div>
@@ -1628,7 +1465,7 @@ function MainApp({handleLogout}) {
     const task = tasks.find(t => t.firebaseId === firebaseId);
     if (!task) return;
     const fijada = !task.fijada;
-    const hist = [...(task.historial||[]), {id:Date.now(),accion:fijada?"Tarea fijada":"Tarea desfijada",usuario:(currentUser?.nombre||"Sistema"),fecha:nowStr()}];
+    const hist = [...(task.historial||[]), {id:Date.now(),accion:fijada?"Tarea fijada":"Tarea desfijada",usuario:(currentUser?.nombre||"Usuario"),fecha:nowStr()}];
     await updateDoc(doc(db, "tasks", firebaseId), {fijada, historial:hist});
   };
   const [showDailyBanner, setShowDailyBanner] = useState(false);
@@ -1706,7 +1543,7 @@ function MainApp({handleLogout}) {
     const task = tasks.find(t => t.firebaseId === firebaseId);
     if (!task) return;
     const completada = !task.completada;
-    const h = {id:Date.now(),accion:completada?"Marcada como completada":"Reabierta",usuario:currentUser.nombre,fecha:nowStr()};
+    const h = {id:Date.now(),accion:completada?"Marcada como completada":"Reabierta",usuario:(currentUser?.nombre||"Usuario"),fecha:nowStr()};
     const hist = [...(task.historial||[]), h];
     if (completada && task.recurrencia && task.recurrencia !== "No repetir") {
       await updateDoc(doc(db, "tasks", firebaseId), {completada:true, completadaEl:todayStr(), historial:hist});
@@ -1721,7 +1558,7 @@ function MainApp({handleLogout}) {
     const task = tasks.find(t => t.firebaseId === firebaseId);
     if (!task) return;
     const esp = !task.esperando;
-    const hist = [...(task.historial||[]), {id:Date.now(),accion:esp?"Esperando respuesta":"Quitado estado Esperando",usuario:currentUser.nombre,fecha:nowStr()}];
+    const hist = [...(task.historial||[]), {id:Date.now(),accion:esp?"Esperando respuesta":"Quitado estado Esperando",usuario:(currentUser?.nombre||"Usuario"),fecha:nowStr()}];
     await updateDoc(doc(db, "tasks", firebaseId), {esperando:esp, completada:false, historial:hist});
   };
 
@@ -1732,7 +1569,7 @@ function MainApp({handleLogout}) {
     const db = getDb();
     const task = tasks.find(t => t.firebaseId === firebaseId);
     const notas = [...(task.notas||[]), {id:Date.now(),text:tx,fecha:todayStr(),usuario:currentUser.nombre}];
-    const hist = [...(task.historial||[]), {id:Date.now(),accion:"Nota agregada",usuario:currentUser.nombre,fecha:nowStr()}];
+    const hist = [...(task.historial||[]), {id:Date.now(),accion:"Nota agregada",usuario:(currentUser?.nombre||"Usuario"),fecha:nowStr()}];
     await updateDoc(doc(db, "tasks", firebaseId), {notas, historial:hist});
   };
   const deleteNote = async (firebaseId, nid) => {
@@ -1758,7 +1595,7 @@ function MainApp({handleLogout}) {
     const db = getDb();
     const task = tasks.find(t => t.firebaseId === firebaseId);
     const subtareas = [...(task.subtareas||[]), {id:Date.now(),titulo:tx,completada:false}];
-    const hist = [...(task.historial||[]), {id:Date.now(),accion:"Subtarea agregada: "+tx,usuario:currentUser.nombre,fecha:nowStr()}];
+    const hist = [...(task.historial||[]), {id:Date.now(),accion:"Subtarea agregada: "+tx,usuario:(currentUser?.nombre||"Usuario"),fecha:nowStr()}];
     await updateDoc(doc(db, "tasks", firebaseId), {subtareas, historial:hist});
   };
   const toggleSubtask = async (firebaseId, sid) => {
@@ -1823,7 +1660,7 @@ function MainApp({handleLogout}) {
   const completadasCount = tasks.filter(t => t.completada).length;
   const filteredTasks = tasks
     .filter(t => filterUrgencia==="Todas"||t.urgencia===filterUrgencia)
-    .filter(t => filterEstado==="Todas"||(filterEstado==="Pendientes"?(!t.completada&&!t.esperando):filterEstado==="Esperando"?t.esperando:t.completada))
+    .filter(t => filterEstado==="Todas"||(filterEstado==="Pendientes"?!t.completada:t.completada))
     .filter(t => filterTag==="Todas"||(t.tagIds||[]).includes(Number(filterTag)))
     .filter(t => filterUser==="Todos"||String(t.responsableId)===String(filterUser))
     .filter(t => { if(!searchQuery.trim())return true; const q=searchQuery.toLowerCase(); return t.titulo.toLowerCase().includes(q)||(t.descripcion||"").toLowerCase().includes(q); })
@@ -1840,14 +1677,14 @@ function MainApp({handleLogout}) {
   const sel = {...inp,cursor:"pointer"};
   const lbl = {fontSize:11,color:"#64748b",display:"block",marginBottom:4,fontWeight:600,textTransform:"uppercase",letterSpacing:0.5};
 
-  // ── NAVEGACIÓN: se agrega "mails" entre cotizador y el separador ──
+  // \u2500\u2500 NAVEGACI\u00d3N: se agrega "mails" entre cotizador y el separador \u2500\u2500
   const navItems = [
-    {id:"agenda",    label:"Agenda",          icon:"📋", primary:true},
-    {id:"calendario",label:"Calendario",      icon:"▦",  primary:false},
-    {id:"usuarios",  label:"Usuarios",        icon:"◉",  primary:false},
-    {id:"etiquetas", label:"Etiquetas",       icon:"◈",  primary:false},
-    {id:"cotizador", label:"Cotizador",       icon:"🌾", primary:true,  separator:true},
-    {id:"mails",     label:"Control de Mails",icon:"✉",  primary:true,  separator:false},
+    {id:"agenda",    label:"Agenda",          icon:"\ud83d\udccb", primary:true},
+    {id:"calendario",label:"Calendario",      icon:"\u25a6",  primary:false},
+    {id:"usuarios",  label:"Usuarios",        icon:"\u25c9",  primary:false},
+    {id:"etiquetas", label:"Etiquetas",       icon:"\u25c8",  primary:false},
+    {id:"cotizador", label:"Cotizador",       icon:"\ud83c\udf3e", primary:true,  separator:true},
+    {id:"mails",     label:"Control de Mails",icon:"\u2709",  primary:true,  separator:false},
   ];
 
   return (
@@ -1865,7 +1702,7 @@ function MainApp({handleLogout}) {
               </div>
             </div>
             <div style={{background:"#00285a",borderRadius:10,padding:"10px 12px",display:"flex",alignItems:"center",gap:10}}>
-              {currentUser && <Avatar nombre={currentUser.nombre} initials={currentUser.initials} color={currentUser.color} size={32}/>}
+              {currentUser && <Avatar nombre={currentUser?.nombre||"Sin usuario"} initials={currentUser.initials} color={currentUser.color} size={32}/>}
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontSize:10,color:"#6ea8d8",letterSpacing:0.8,textTransform:"uppercase",marginBottom:1}}>Usuario activo</div>
                 <div style={{fontSize:12,color:"#f1f5f9",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{currentUser?.nombre||"Sin usuario"}</div>
@@ -1951,11 +1788,11 @@ function MainApp({handleLogout}) {
 
         {/* TOPBAR */}
         <div style={{background:"#fff",borderBottom:"1px solid #e2e8f0",padding:"11px 16px",display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
-          {isMobile&&<button onClick={()=>setSidebarOpen(!sidebarOpen)} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#475569",padding:"2px 4px"}}>☰</button>}
+          {isMobile&&<button onClick={()=>setSidebarOpen(!sidebarOpen)} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#475569",padding:"2px 4px"}}>\u2630</button>}
           <div style={{flex:1,display:"flex",alignItems:"center",gap:10}}>
             <TrillaLogo size={20} color="#003264"/>
             <h1 style={{margin:0,fontSize:15,fontWeight:700,color:"#0f172a",letterSpacing:1,fontFamily:GEO}}>
-              {view==="agenda"?"Gestión de Tareas":view==="calendario"?"Calendario":view==="usuarios"?"Usuarios":view==="cotizador"?"Cotizador Agrícola":view==="mails"?"Control de Mails":"Etiquetas"}
+              {view==="agenda"?"Gesti\u00f3n de Tareas":view==="calendario"?"Calendario":view==="usuarios"?"Usuarios":view==="cotizador"?"Cotizador Agr\u00edcola":view==="mails"?"Control de Mails":"Etiquetas"}
             </h1>
           </div>
           <button onClick={openDailyBanner} style={{background:"#003264",color:"white",border:"none",borderRadius:6,padding:"7px 10px",cursor:"pointer",display:"flex",alignItems:"center",flexShrink:0}}>
@@ -1985,7 +1822,7 @@ function MainApp({handleLogout}) {
           </div>
         )}
 
-        {/* Botón flotante de micrófono — solo en agenda */}
+        {/* Bot\u00f3n flotante de micr\u00f3fono \u2014 solo en agenda */}
         {view==="agenda" && (
           <>
             <button onClick={listening?stopListening:startListening} style={{position:"fixed",bottom:28,right:28,width:64,height:64,borderRadius:"50%",background:listening?"#ef4444":"#003264",color:"white",border:"none",cursor:"pointer",boxShadow:"0 4px 20px rgba(0,0,0,0.3)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:250,transition:"all 0.2s",transform:listening?"scale(1.1)":"scale(1)"}}>
@@ -1998,10 +1835,10 @@ function MainApp({handleLogout}) {
           </>
         )}
 
-        {/* ÁREA DE CONTENIDO */}
+        {/* \u00c1REA DE CONTENIDO */}
         <div style={{flex:1,overflowY:"auto",padding:"16px"}}>
 
-          {/* ── CONTROL DE MAILS ── */}
+          {/* \u2500\u2500 CONTROL DE MAILS \u2500\u2500 */}
           {view==="mails" && <ControlMails/>}
 
           {view==="agenda"&&(
@@ -2012,7 +1849,7 @@ function MainApp({handleLogout}) {
                   {searchQuery&&<button onClick={()=>setSearchQuery("")} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"#94a3b8",fontSize:14}}>x</button>}
                 </div>
                 <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                  <select value={filterEstado} onChange={e=>setFilterEstado(e.target.value)} style={{...sel,width:"auto",minWidth:110,fontSize:12}}>{["Todas","Pendientes","Completadas","Esperando"].map(o=><option key={o}>{o}</option>)}</select>
+                  <select value={filterEstado} onChange={e=>setFilterEstado(e.target.value)} style={{...sel,width:"auto",minWidth:110,fontSize:12}}>{["Todas","Pendientes","Completadas"].map(o=><option key={o}>{o}</option>)}</select>
                   <select value={filterUrgencia} onChange={e=>setFilterUrgencia(e.target.value)} style={{...sel,width:"auto",minWidth:100,fontSize:12}}>{["Todas","Alta","Media","Baja"].map(o=><option key={o}>{o}</option>)}</select>
                   <select value={filterTag} onChange={e=>setFilterTag(e.target.value)} style={{...sel,width:"auto",minWidth:130,fontSize:12}}><option value="Todas">Todas las etiquetas</option>{tags.map(g=><option key={g.id} value={g.id}>{g.label}</option>)}</select>
                   <select value={filterUser} onChange={e=>setFilterUser(e.target.value)} style={{...sel,width:"auto",minWidth:120,fontSize:12}}><option value="Todos">Todos los usuarios</option>{users.map(u=><option key={u.id} value={u.id}>{u.nombre}</option>)}</select>
@@ -2169,7 +2006,7 @@ function MainApp({handleLogout}) {
                     <input value={newUserName} onChange={e=>{setNewUserName(e.target.value); if(!editUserId) setNewUserInitials(e.target.value.slice(0,2).toUpperCase());}} onKeyDown={e=>e.key==="Enter"&&addUser()} placeholder="Nombre del usuario" style={inp}/>
                   </div>
                   <div>
-                    <label style={lbl}>Iniciales (máx. 2)</label>
+                    <label style={lbl}>Iniciales (m\u00e1x. 2)</label>
                     <input value={newUserInitials} onChange={e=>setNewUserInitials(e.target.value.toUpperCase().slice(0,2))} placeholder="Ej: JD" maxLength={2} style={inp}/>
                   </div>
                   <div>
